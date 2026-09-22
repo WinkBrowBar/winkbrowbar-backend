@@ -1,0 +1,60 @@
+<!--
+  Attribution capture snippet.
+  Add this inside theme.liquid, just before </body>.
+  Replace API_BASE_URL and BRAND_ID with your actual values.
+-->
+<script>
+(function () {
+  var API_BASE_URL = "https://your-backend-url.com"; // your deployed backend
+  var BRAND_ID = "REPLACE_WITH_BRAND_UUID";           // from the brands table
+  var API_KEY = "REPLACE_WITH_INTERNAL_API_KEY";      // matches INTERNAL_API_KEY in .env
+
+  function getOrCreateVisitorId() {
+    var key = "attr_visitor_id";
+    var id = localStorage.getItem(key);
+    if (!id) {
+      id = "v_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem(key, id);
+    }
+    return id;
+  }
+
+  function getParam(name) {
+    var params = new URLSearchParams(window.location.search);
+    return params.get(name) || null;
+  }
+
+  // Only capture once per session per landing (avoid duplicate rows on every internal click)
+  var alreadyCapturedThisLoad = sessionStorage.getItem("attr_captured_this_load");
+  if (alreadyCapturedThisLoad) return;
+  sessionStorage.setItem("attr_captured_this_load", "1");
+
+  var payload = {
+    brandId: BRAND_ID,
+    visitorId: getOrCreateVisitorId(),
+    utmSource: getParam("utm_source"),
+    utmMedium: getParam("utm_medium"),
+    utmCampaign: getParam("utm_campaign"),
+    utmContent: getParam("utm_content"),
+    utmTerm: getParam("utm_term"),
+    landingPageUrl: window.location.href,
+    referrer: document.referrer || null,
+    gclid: getParam("gclid"),
+    fbclid: getParam("fbclid"),
+    awinClickId: getParam("awc"),
+  };
+
+  // Only bother sending if there's actually something to capture
+  var hasSignal = payload.utmSource || payload.gclid || payload.fbclid || payload.awinClickId;
+  if (!hasSignal) return;
+
+  fetch(API_BASE_URL + "/api/attribution/capture", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+    body: JSON.stringify(payload),
+    keepalive: true,
+  }).catch(function (err) {
+    console.warn("Attribution capture failed", err);
+  });
+})();
+</script>

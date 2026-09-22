@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"brandId":{"$numberInt":"1"},"zenotiInvoiceId":{"$numberInt":"1"}},"name":"brandId_1_zenotiInvoiceId_1","background":true,"unique":true}],"uuid":"dc5c5f4165934cc2900bc3fd7f8bacff","collectionName":"invoices","type":"collection"}
