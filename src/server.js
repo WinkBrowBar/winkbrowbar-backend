@@ -19,6 +19,15 @@ const zenotiWebhook = require('./webhooks/zenotiWebhook');
 
 const app = express();
 
+// This server runs behind a reverse proxy (nginx/load balancer on EC2),
+// which sets X-Forwarded-For. Without telling Express to trust it,
+// express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on every
+// request instead of safely reading the real client IP - this was the
+// cause of repeated crash/restarts. '1' = trust the first hop only
+// (the immediate proxy in front of this app), which is correct for a
+// single reverse proxy in front of one app server.
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(cors());
 app.use(express.json({
