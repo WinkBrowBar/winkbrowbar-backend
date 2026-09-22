@@ -135,6 +135,40 @@ async function handleEvent(brandId, event) {
       });
     }
 
+    // Zenoti passes through the UTM params from the original booking URL
+    // (winkbrowbar.zenoti.com/...?awc=...&utm_source=awin&utm_medium=...)
+    // directly on this event, tied to this exact guest/appointment. This is
+    // a more direct signal than relying on the browser's cross-domain
+    // /identify call - no dependency on that JS having fired correctly, no
+    // visitorId matching needed. Create an already-identified Visit right
+    // here whenever this data is present.
+    if (data.utm_source && customer) {
+      const Visit = require('../db/models/Visit');
+      // utm_medium already IS the AWIN click id in this org's setup
+      // (packed as publisherId_timestamp_clickId, e.g.
+      // "127709_1790078323_a5fd5e44f44eb52ac925379ed8503ccf") - use it
+      // directly rather than re-splitting it, same value the old Zapier
+      // flow extracted and sent to AWIN.
+      const awinClickId = data.utm_source === 'awin' ? (data.utm_medium || null) : null;
+
+      const visit = await Visit.create({
+        brandId,
+        customerId: customer._id,
+        // No real browser visitorId is available from this server-to-server
+        // event - synthesize a stable one scoped to this appointment group
+        // so it never collides with a real cookie-based visitorId.
+        visitorId: 'zenoti_' + data.appointment_group_id,
+        utmSource: data.utm_source,
+        utmMedium: data.utm_medium || null,
+        awinClickId,
+        capturedAt: data.event_timestamp ? new Date(data.event_timestamp) : new Date(),
+      });
+
+      if (!customer.firstTouchVisitId) customer.firstTouchVisitId = visit._id;
+      customer.latestTouchVisitId = visit._id;
+      await customer.save();
+    }
+
     await Appointment.create({
       brandId,
       customerId: customer ? customer._id : null,
