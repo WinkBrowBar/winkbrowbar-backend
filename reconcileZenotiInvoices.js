@@ -6,29 +6,47 @@
 // is no RawEvent row to retry: nothing was ever received.
 //
 // This closes that gap by periodically asking Zenoti's own API directly
-// "what closed invoices exist for center X between date A and B" and
-// creating anything missing here, using the exact same handleEvent() logic
-// the live webhook uses (so identity resolution, attribution, everything
-// downstream runs identically either way).
+// "what sales exist for date range X" and creating anything missing here,
+// using the exact same handleEvent() logic the live webhook uses (so
+// identity resolution, attribution, everything downstream runs identically
+// either way).
+//
+// CONFIRMED 2026-09-26 against the real API: uses the Sales Accrual Report
+// endpoint (POST /v1/reports/sales/accrual_basis/flat_file). This was the
+// only endpoint this account's API key is scoped for - /v1/centers and
+// /api/v2.0/Invoices/invoices_by_date both returned "Authorization has been
+// denied". Also confirmed: the date filter is a top-level {start_date,
+// end_date} pair in the POST body - Zenoti's own docs show a nested
+// invoice_closed_date field instead, which returned "Something went wrong"
+// when tried; top-level start_date/end_date is what actually works.
+//
+// This endpoint returns one row per LINE ITEM (a service/product sold), not
+// one row per invoice, and covers every center this key has access to in a
+// single call - no separate per-center loop needed. Rows for the same
+// invoice are grouped back together here before being handed to
+// handleEvent().
+//
+// Known limitation: this report does not include guest email/phone, only
+// guest_id + guest_name. Identity resolution here falls back to matching by
+// zenotiGuestId alone - fine for any guest who already has a Customer
+// record from a prior guest.created/updated webhook (the normal case), but
+// a guest who has genuinely NEVER triggered any other webhook event will
+// get created with a name only, no email/phone, same as the live webhook
+// would do with a guest.id-only reference.
 //
 // Meant to run on a schedule (cron), not just by hand - see the crontab
 // line suggested at the end of its output. Safe to re-run: every write is
 // either an upsert or a "skip if already present" check, so running this
 // every night forever cannot create duplicates or double-count revenue.
 //
-// Requires the same Zenoti API credentials backfillMissedZenotiInvoices.js
-// already uses (NOT the webhook secret):
+// Requires (NOT the webhook secret):
 //   ZENOTI_API_BASE=https://api.zenoti.com   (or your region's API host)
 //   ZENOTI_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 //
 // Usage:
 //   node reconcileZenotiInvoices.js --brand=<brandId or slug>   # rolling 5-day window, applies for real
-//   node reconcileZenotiInvoices.js --brand=<...> --days=14     # wider window (e.g. first run, to catch older gaps)
+//   node reconcileZenotiInvoices.js --brand=<...> --days=30     # wider window (e.g. first run, to catch older gaps)
 //   node reconcileZenotiInvoices.js --brand=<...> --dry-run     # preview only, writes nothing
-//
-// Centers are discovered automatically from the Zenoti API (same call as
-// listZenotiCentersFromApi.js) rather than relying on the brand's single
-// zenotiCenterId field, since a brand can have more than one location.
 
 require('dotenv').config();
 const mongoose = require('mongoose');
@@ -47,83 +65,95 @@ function argValue(name) {
 
 const ZENOTI_API_BASE = process.env.ZENOTI_API_BASE || 'https://api.zenoti.com';
 const ZENOTI_API_KEY = process.env.ZENOTI_API_KEY;
+const REPORT_URL = `${ZENOTI_API_BASE}/v1/reports/sales/accrual_basis/flat_file`;
 
-function toDateStr(d) {
-  return d.toISOString().slice(0, 10);
-}
-
-async function fetchAllCenters() {
-  const { data } = await axios.get(`${ZENOTI_API_BASE}/v1/centers`, {
-    headers: { Authorization: `apikey ${ZENOTI_API_KEY}` },
-  });
-  return data.centers || data || [];
-}
-
-async function fetchInvoicesForCenter({ centerId, startDate, endDate }) {
+async function fetchAllSalesRows({ startDate, endDate }) {
   const all = [];
   let page = 1;
-  const pageSize = 100;
+  const size = 200;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const url = `${ZENOTI_API_BASE}/api/v2.0/Invoices/invoices_by_date`;
-    const { data } = await axios.get(url, {
-      headers: { Authorization: `apikey ${ZENOTI_API_KEY}` },
-      params: {
-        CenterId: centerId,
-        StartDate: startDate,
-        EndDate: endDate,
-        PageNumber: page,
-        NumberOfRecords: pageSize,
-      },
-    });
+    const { data } = await axios.post(
+      REPORT_URL,
+      { start_date: startDate, end_date: endDate },
+      {
+        params: { Page: page, Size: size },
+        headers: { Authorization: `apikey ${ZENOTI_API_KEY}`, 'Content-Type': 'application/json' },
+      }
+    );
 
-    const batch = data.invoices || data.Invoices || data.data || [];
+    const batch = data.sales || [];
     all.push(...batch);
 
-    if (batch.length < pageSize) break;
+    const total = data.page_info ? data.page_info.total : batch.length;
+    if (all.length >= total || batch.length < size) break;
     page += 1;
   }
 
   return all;
 }
 
-// Reshapes a Zenoti "invoices_by_date" record into the same
-// { event_type, data: { invoice: {...} } } shape the live webhook receives
-// for invoice.closed, so it goes through handleEvent() identically - same
-// invoiceNumber, tax, currency, isPaidInFull-safety-net logic, everything.
-function toSyntheticEvent(rawInvoice, centerId, centerNameFromApi) {
-  const guest = rawInvoice.guest || rawInvoice.Guest || {};
-  const totalPrice = rawInvoice.total_price || rawInvoice.TotalPrice || {};
-  const transactions = rawInvoice.transactions || rawInvoice.Transactions || [];
+// Groups line-item rows back into one row per invoice, and reshapes into
+// the same { event_type, data: { invoice: {...} } } envelope the live
+// webhook receives for invoice.closed, so it goes through handleEvent()
+// identically - same currency-per-brand, invoiceNumber, everything.
+function groupIntoInvoices(rows) {
+  const byInvoice = new Map();
+
+  for (const row of rows) {
+    const id = row.invoice_id;
+    if (!id) continue;
+    if (!byInvoice.has(id)) {
+      byInvoice.set(id, {
+        id,
+        invoice_no: row.invoice_no,
+        center_id: row.center_id,
+        center_name: row.center_name,
+        guest_id: row.guest_id,
+        guest_name: row.guest_name,
+        invoice_date: row.invoice_date || row.sale_date,
+        status: row.status,
+        items: [],
+        sum_total: 0,
+        tax: 0,
+      });
+    }
+    const inv = byInvoice.get(id);
+    inv.sum_total += Number(row.sales_inc_tax) || 0;
+    inv.tax += Number(row.tax) || 0;
+    inv.items.push({ name: row.item_name, price: Number(row.price) || 0 });
+  }
+
+  return Array.from(byInvoice.values());
+}
+
+function toSyntheticEvent(inv) {
+  const nameParts = (inv.guest_name || '').trim().split(/\s+/);
+  const first_name = nameParts[0] || null;
+  const last_name = nameParts.slice(1).join(' ') || null;
 
   return {
     event_type: 'invoice.closed',
     data: {
       invoice: {
-        id: rawInvoice.invoice_id || rawInvoice.id || rawInvoice.InvoiceId,
-        invoice_number: rawInvoice.invoice_number || rawInvoice.InvoiceNumber || null,
-        invoice_number_prefix: rawInvoice.invoice_number_prefix || rawInvoice.InvoiceNumberPrefix || '',
-        is_closed: rawInvoice.status === 'CLOSE' || rawInvoice.status === 'closed' || rawInvoice.is_closed !== false,
-        is_refund: Boolean(rawInvoice.is_refund ?? rawInvoice.IsRefund ?? (totalPrice.sum_total ?? totalPrice.SumTotal ?? rawInvoice.sum_total ?? rawInvoice.amount ?? 0) < 0),
-        invoice_date: rawInvoice.created_date || rawInvoice.invoice_date || rawInvoice.CreatedDate,
-        transactions,
-        total_price: {
-          sum_total: totalPrice.sum_total ?? totalPrice.SumTotal ?? rawInvoice.sum_total ?? rawInvoice.amount,
-          tax: totalPrice.tax ?? totalPrice.Tax ?? 0,
-        },
-        invoice_items: (rawInvoice.invoice_items || rawInvoice.InvoiceItems || []).map((item) => ({
-          name: item.name || item.Name,
-          price: { final: (item.price && (item.price.final ?? item.price.Final)) || item.final_price || 0 },
-        })),
-        center: { id: centerId, name: centerNameFromApi || rawInvoice.center_name || null },
-        center_id: centerId,
+        id: inv.id,
+        invoice_number: inv.invoice_no || null,
+        invoice_number_prefix: '', // invoice_no from this report already includes any prefix
+        is_closed: typeof inv.status === 'string' && inv.status.toLowerCase() === 'closed',
+        is_refund: inv.sum_total < 0,
+        invoice_date: inv.invoice_date,
+        transactions: [], // not available from this report - is_closed comes straight from `status` instead
+        total_price: { sum_total: inv.sum_total, tax: inv.tax },
+        invoice_items: inv.items.map((it) => ({ name: it.name, price: { final: it.price } })),
+        center: { id: inv.center_id, name: inv.center_name },
+        center_id: inv.center_id,
         guest: {
-          id: guest.id || guest.Id || rawInvoice.guest_id,
-          email: guest.email || guest.Email,
-          mobile_phone: guest.mobile_phone || guest.Mobile || null,
-          first_name: guest.first_name || guest.FirstName,
-          last_name: guest.last_name || guest.LastName,
+          id: inv.guest_id,
+          email: null, // not available from this report
+          mobile_phone: null,
+          first_name,
+          last_name,
         },
       },
     },
@@ -158,75 +188,55 @@ async function run() {
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - days);
-  const startStr = toDateStr(start);
-  const endStr = toDateStr(end);
+  // CONFIRMED format from the real API test: "YYYY-MM-DDTHH:MM:SS"
+  const startStr = `${start.toISOString().slice(0, 10)}T00:00:00`;
+  const endStr = `${end.toISOString().slice(0, 10)}T23:59:59`;
 
   console.log(`Brand: ${brand.name} (${brand._id})`);
   console.log(`Window: ${startStr} -> ${endStr} (last ${days} days)`);
   console.log(DRY_RUN ? 'MODE: --dry-run (nothing will be written)\n' : 'MODE: live (writing anything missing)\n');
 
-  let centers;
+  let rows;
   try {
-    centers = await fetchAllCenters();
+    rows = await fetchAllSalesRows({ startDate: startStr, endDate: endStr });
   } catch (err) {
-    console.error('Failed to list centers from Zenoti API:', err.response ? err.response.data : err.message);
+    console.error('Failed to fetch sales accrual report:', err.response ? err.response.data : err.message);
     process.exit(1);
   }
 
-  if (!centers.length) {
-    console.error('Zenoti API returned zero centers - nothing to reconcile against.');
-    process.exit(1);
-  }
+  console.log(`Fetched ${rows.length} line item row(s) from Zenoti.`);
 
-  let fetched = 0;
+  const invoices = groupIntoInvoices(rows);
+  console.log(`Grouped into ${invoices.length} distinct invoice(s).\n`);
+
   let alreadyHad = 0;
   let created = 0;
   let failed = 0;
 
-  for (const c of centers) {
-    const centerId = c.id;
-    console.log(`\n--- ${c.name || centerId} ---`);
-    let rawInvoices;
-    try {
-      rawInvoices = await fetchInvoicesForCenter({ centerId, startDate: startStr, endDate: endStr });
-    } catch (err) {
-      console.error(`Failed to fetch invoices for ${c.name || centerId}:`, err.response ? err.response.data : err.message);
-      continue;
+  for (const inv of invoices) {
+    const existing = await Invoice.findOne({ brandId: brand._id, zenotiInvoiceId: inv.id });
+    if (existing) {
+      alreadyHad += 1;
+      continue; // already synced via webhook - don't double count revenue
     }
 
-    console.log(`Fetched ${rawInvoices.length} invoice(s) from Zenoti.`);
-    fetched += rawInvoices.length;
+    console.log(`MISSING -> invoice ${inv.invoice_no}, amount ${inv.sum_total.toFixed(2)}, status ${inv.status}, date ${inv.invoice_date}, center ${inv.center_name}`);
 
-    for (const raw of rawInvoices) {
-      const zenotiInvoiceId = raw.invoice_id || raw.id || raw.InvoiceId;
-      if (!zenotiInvoiceId) continue;
-
-      const existing = await Invoice.findOne({ brandId: brand._id, zenotiInvoiceId });
-      if (existing) {
-        alreadyHad += 1;
-        continue; // already synced via webhook - don't double count revenue
-      }
-
-      const syntheticEvent = toSyntheticEvent(raw, centerId, c.name);
-      const inv = syntheticEvent.data.invoice;
-      console.log(`MISSING -> invoice ${inv.invoice_number_prefix}${inv.invoice_number || inv.id}, amount ${inv.total_price.sum_total}, date ${inv.invoice_date}`);
-
-      if (!DRY_RUN) {
-        try {
-          await handleEvent(String(brand._id), syntheticEvent);
-          created += 1;
-        } catch (err) {
-          console.error(`  -> FAILED to process: ${err.message}`);
-          failed += 1;
-        }
-      } else {
+    if (!DRY_RUN) {
+      try {
+        await handleEvent(String(brand._id), toSyntheticEvent(inv));
         created += 1;
+      } catch (err) {
+        console.error(`  -> FAILED to process: ${err.message}`);
+        failed += 1;
       }
+    } else {
+      created += 1;
     }
   }
 
   console.log('\n--- Summary ---');
-  console.log(`Invoices fetched from Zenoti: ${fetched}`);
+  console.log(`Invoices fetched from Zenoti: ${invoices.length}`);
   console.log(`Already present (skipped): ${alreadyHad}`);
   console.log(`Invoices ${DRY_RUN ? 'that WOULD be created' : 'created/processed'}: ${created}`);
   if (failed) console.log(`Failed to process: ${failed}`);
