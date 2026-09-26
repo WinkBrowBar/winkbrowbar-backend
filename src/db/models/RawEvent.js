@@ -8,6 +8,12 @@ const rawEventSchema = new Schema({
   processed: { type: Boolean, default: false },
   processedAt: Date,
   receivedAt: { type: Date, default: Date.now },
+  // Set whenever handleEvent() throws, so a failed event is diagnosable
+  // instead of only ever logged to console (which nobody watches). Cleared
+  // back to null the moment reprocessing succeeds.
+  processingError: { type: String, default: null },
+  processingAttempts: { type: Number, default: 0 },
+  lastAttemptAt: { type: Date, default: null },
 });
 
 rawEventSchema.index({ processed: 1 });

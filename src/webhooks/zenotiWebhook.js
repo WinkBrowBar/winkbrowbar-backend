@@ -47,12 +47,24 @@ router.post('/', async (req, res) => {
   const event = req.body;
   const detectedType = detectEventType(event);
 
-  const rawEvent = await RawEvent.create({
-    brandId,
-    source: 'zenoti',
-    eventType: detectedType,
-    payload: event,
-  });
+  // Wrapped in try/catch: previously, a DB hiccup on this very create() call
+  // would throw inside an unhandled async route handler and just leave the
+  // request hanging with no response at all - indistinguishable, from
+  // Zenoti's side, from us being down, and with nothing saved on our end to
+  // ever recover the event from. Now we always answer, and a failure here
+  // is at least visible in the response/logs rather than a silent hang.
+  let rawEvent;
+  try {
+    rawEvent = await RawEvent.create({
+      brandId,
+      source: 'zenoti',
+      eventType: detectedType,
+      payload: event,
+    });
+  } catch (err) {
+    console.error('Failed to persist Zenoti raw event - event may be lost if Zenoti does not retry', err);
+    return res.status(500).json({ error: 'Failed to record event' });
+  }
 
   res.status(202).json({ received: true });
 
@@ -60,9 +72,19 @@ router.post('/', async (req, res) => {
     await handleEvent(brandId, event);
     rawEvent.processed = true;
     rawEvent.processedAt = new Date();
+    rawEvent.processingError = null;
     await rawEvent.save();
   } catch (err) {
     console.error('Zenoti event processing failed', err);
+    // Recorded on the doc (not just console) so reprocessFailedEvents.js -
+    // and anyone looking - can find and retry this, instead of it only
+    // ever existing in a log stream nobody is watching.
+    rawEvent.processingError = err.message || String(err);
+    rawEvent.processingAttempts = (rawEvent.processingAttempts || 0) + 1;
+    rawEvent.lastAttemptAt = new Date();
+    await rawEvent.save().catch((saveErr) => {
+      console.error('Additionally failed to record the processing error itself', saveErr);
+    });
   }
 });
 
