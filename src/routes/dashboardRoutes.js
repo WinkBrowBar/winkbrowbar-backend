@@ -2,11 +2,14 @@ const express = require('express');
 const mongoose = require('mongoose');
 const Conversion = require('../db/models/Conversion');
 const Invoice = require('../db/models/Invoice');
+const Brand = require('../db/models/Brand');
 const Customer = require('../db/models/Customer');
 const Visit = require('../db/models/Visit');
+const Appointment = require('../db/models/Appointment');
 const AdSpend = require('../db/models/AdSpend');
 const { requireRole } = require('../middleware/requireAuth');
 const { centerName, CENTER_NAMES } = require('../utils/centerNames');
+const { pickAttributedVisit, platformFromVisit } = require('../services/attribution');
 const router = express.Router();
 
 router.use(requireRole('admin', 'viewer'));
@@ -210,6 +213,7 @@ router.get('/campaigns', async (req, res) => {
 
 router.get('/campaigns/customers', async (req, res) => {
   const brandId = req.user.brandId;
+  const brandObjectId = new mongoose.Types.ObjectId(brandId);
   const { platform, campaign, search } = req.query;
   const { since, until } = resolveForwardRange(req.query);
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -220,52 +224,92 @@ router.get('/campaigns/customers', async (req, res) => {
   }
 
   try {
-    const campaignMatch = campaign === '(no campaign)' ? { $in: [null, ''] } : campaign;
+    const isNoCampaign = campaign === '(no campaign)';
+    const campaignMatch = isNoCampaign ? { $in: [null, ''] } : campaign;
 
-    const basePipeline = [
-      { $match: { brandId: new mongoose.Types.ObjectId(brandId), status: 'sent', platform, eventTime: { $gte: since, $lte: until } } },
+    // CLOSED invoices: exactly the conversions that already feed the campaign
+    // revenue numbers, one row per invoice. Revenue math is unchanged.
+    const closedRows = await Conversion.aggregate([
+      { $match: { brandId: brandObjectId, status: 'sent', platform, eventTime: { $gte: since, $lte: until } } },
       { $lookup: { from: 'visits', localField: 'attributionVisitId', foreignField: '_id', as: 'visit' } },
       { $unwind: { path: '$visit', preserveNullAndEmptyArrays: true } },
       { $match: { 'visit.utmCampaign': campaignMatch } },
+      { $lookup: { from: 'invoices', localField: 'invoiceId', foreignField: '_id', as: 'invoice' } },
+      { $unwind: { path: '$invoice', preserveNullAndEmptyArrays: true } },
       { $lookup: { from: 'customers', localField: 'customerId', foreignField: '_id', as: 'customer' } },
       { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
       {
-        $group: {
-          _id: '$customerId',
-          name: { $first: '$customer.name' },
-          email: { $first: '$customer.email' },
-          phone: { $first: '$customer.phone' },
-          conversions: { $sum: 1 },
-          revenue: { $sum: '$amount' },
-          lastConvertedAt: { $max: '$eventTime' },
-          utmSource: { $first: '$visit.utmSource' },
-          utmMedium: { $first: '$visit.utmMedium' },
-          landingPageUrl: { $first: '$visit.landingPageUrl' },
+        $project: {
+          _id: 0,
+          invoiceId: '$invoiceId',
+          invoiceNumber: '$invoice.invoiceNumber',
+          status: { $literal: 'closed' },
+          name: '$customer.name',
+          email: '$customer.email',
+          phone: '$customer.phone',
+          amount: '$amount',
+          date: '$eventTime',
+          utmSource: '$visit.utmSource',
+          utmMedium: '$visit.utmMedium',
         },
       },
-    ];
-
-    // Search by name/email/phone happens after grouping, since those fields
-    // only exist once we've joined to the customer collection.
-    if (search && search.trim()) {
-      const re = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      basePipeline.push({ $match: { $or: [{ name: re }, { email: re }, { phone: re }] } });
-    }
-
-    basePipeline.push({ $sort: { lastConvertedAt: -1 } });
-
-    const [rows, countResult] = await Promise.all([
-      Conversion.aggregate([...basePipeline, { $skip: (page - 1) * limit }, { $limit: limit }]),
-      Conversion.aggregate([...basePipeline, { $count: 'total' }]),
     ]);
 
-    const total = countResult[0] ? countResult[0].total : 0;
+    // OPEN invoices have no Conversion yet, so work out which campaign they
+    // WOULD be credited to using the same rules conversionService uses.
+    // Listed for visibility only - never included in revenue totals.
+    const openInvoices = await Invoice.find({
+      brandId: brandObjectId,
+      status: 'open',
+      isRefund: { $ne: true },
+      customerId: { $ne: null },
+      closedAt: { $gte: since, $lte: until },
+    }).lean();
 
+    const brandDoc = await Brand.findById(brandId);
+    const openRows = [];
+    for (const inv of openInvoices) {
+      let { visit } = await pickAttributedVisit({ brandId, customerId: inv.customerId, beforeTimestamp: inv.closedAt, brand: brandDoc });
+      let plat = visit ? (platformFromVisit(visit) || {}).platform : null;
+      if (!plat) {
+        ({ visit } = await pickAttributedVisit({ brandId, customerId: inv.customerId, beforeTimestamp: inv.closedAt, requireClickId: false, brand: brandDoc }));
+        plat = visit && visit.utmSource ? visit.utmSource.toLowerCase() : 'direct';
+      }
+      if (plat !== platform) continue;
+      const visitCampaign = visit ? visit.utmCampaign : null;
+      if (isNoCampaign ? !!visitCampaign : visitCampaign !== campaign) continue;
+
+      const customer = await Customer.findById(inv.customerId).lean();
+      openRows.push({
+        invoiceId: inv._id,
+        invoiceNumber: inv.invoiceNumber || null,
+        status: 'open',
+        name: customer && customer.name,
+        email: customer && customer.email,
+        phone: customer && customer.phone,
+        amount: inv.amount,
+        date: inv.closedAt,
+        utmSource: visit ? visit.utmSource : null,
+        utmMedium: visit ? visit.utmMedium : null,
+      });
+    }
+
+    let rows = [...closedRows, ...openRows];
+
+    if (search && search.trim()) {
+      const re = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      rows = rows.filter((r) => re.test(r.name || '') || re.test(r.email || '') || re.test(r.phone || '') || re.test(r.invoiceNumber || ''));
+    }
+
+    rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const total = rows.length;
     res.json({
-      customers: rows,
+      invoices: rows.slice((page - 1) * limit, page * limit),
       page,
       limit,
       total,
+      openCount: rows.filter((r) => r.status === 'open').length,
       totalPages: Math.max(1, Math.ceil(total / limit)),
     });
   } catch (err) {
@@ -634,14 +678,15 @@ router.get('/trend', async (req, res) => {
 router.get('/transactions', async (req, res) => {
   const brandId = req.user.brandId;
   const { since, until } = resolveRange(req.query);
-  const { search, platform, location } = req.query;
+  const { search, platform, location, status } = req.query;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Number(req.query.limit) || 25);
 
   try {
+    const statusFilter = status === 'open' || status === 'closed' ? status : { $in: ['closed', 'open'] };
     const matchStage = {
       brandId: new mongoose.Types.ObjectId(brandId),
-      status: 'closed',
+      status: statusFilter, // list only - revenue endpoints still count closed only
       closedAt: { $gte: since, $lte: until },
       ...centerMatchClause(location),
     };
@@ -683,7 +728,7 @@ router.get('/transactions', async (req, res) => {
       {
         $addFields: {
           campaign: { $ifNull: ['$visit.utmCampaign', '(no campaign)'] },
-          platformLabel: { $ifNull: ['$conversion.platform', 'unattributed'] },
+          platformLabel: { $ifNull: ['$conversion.platform', { $cond: [{ $eq: ['$status', 'open'] }, 'pending', 'unattributed'] }] },
           platformList: '$allConversions.platform',
         },
       },
@@ -696,6 +741,7 @@ router.get('/transactions', async (req, res) => {
               ? [{
                   $match: {
                     $or: [
+                      { invoiceNumber: { $regex: search.trim(), $options: 'i' } },
                       { 'customer.name': { $regex: search.trim(), $options: 'i' } },
                       { 'customer.email': { $regex: search.trim(), $options: 'i' } },
                       { 'items.name': { $regex: search.trim(), $options: 'i' } },
@@ -710,6 +756,8 @@ router.get('/transactions', async (req, res) => {
               $project: {
                 _id: 0,
                 invoiceId: '$_id',
+                invoiceNumber: '$invoiceNumber',
+                customerId: '$customerId',
                 customerName: '$customer.name',
                 email: '$customer.email',
                 productName: '$items.name',
@@ -718,6 +766,7 @@ router.get('/transactions', async (req, res) => {
                 platform: '$platformLabel',
                 campaign: '$campaign',
                 purchaseDate: '$closedAt',
+                status: '$status',
               },
             },
           ],
@@ -727,6 +776,7 @@ router.get('/transactions', async (req, res) => {
               ? [{
                   $match: {
                     $or: [
+                      { invoiceNumber: { $regex: search.trim(), $options: 'i' } },
                       { 'customer.name': { $regex: search.trim(), $options: 'i' } },
                       { 'customer.email': { $regex: search.trim(), $options: 'i' } },
                       { 'items.name': { $regex: search.trim(), $options: 'i' } },
@@ -753,6 +803,28 @@ router.get('/transactions', async (req, res) => {
   const [result] = await Invoice.aggregate(pipeline);
     const total = result.totalCount[0] ? result.totalCount[0].count : 0;
     const availablePlatforms = result.availablePlatforms.map((p) => p._id).filter(Boolean);
+
+    // Open invoices don't have a Conversion doc yet (that's only created when
+    // the invoice closes), so the pipeline above can't join to a visit for
+    // them and they come back as platform "pending" / "(no campaign)". Work
+    // out what they WOULD be attributed to right now, using the exact same
+    // rule conversionService uses at close time, so the row already shows
+    // the correct source/campaign instead of just "pending".
+    const hasOpenRows = result.data.some((row) => row.status === 'open');
+    const transactionsBrand = hasOpenRows ? await Brand.findById(brandId) : null;
+    for (const row of result.data) {
+      if (row.status !== 'open' || !row.customerId) continue;
+      let { visit } = await pickAttributedVisit({ brandId, customerId: row.customerId, beforeTimestamp: row.purchaseDate, brand: transactionsBrand });
+      let plat = visit ? (platformFromVisit(visit) || {}).platform : null;
+      if (!plat) {
+        ({ visit } = await pickAttributedVisit({ brandId, customerId: row.customerId, beforeTimestamp: row.purchaseDate, requireClickId: false, brand: transactionsBrand }));
+        plat = visit && visit.utmSource ? visit.utmSource.toLowerCase() : 'direct';
+      }
+      row.platform = plat || 'pending';
+      row.campaign = visit && visit.utmCampaign ? visit.utmCampaign : '(no campaign)';
+      delete row.customerId;
+    }
+    result.data.forEach((row) => delete row.customerId);
 
     res.json({
       transactions: result.data,
@@ -835,6 +907,117 @@ router.get('/refunds', async (req, res) => {
   } catch (err) {
     console.error('dashboard refunds error', err);
     res.status(500).json({ error: 'Failed to build refunds list' });
+  }
+});
+
+// Bookings that exist in Zenoti (guest booked, deposit or full payment may
+// or may not have happened) but haven't turned into a closed - or even
+// open - Invoice yet. Zenoti fires AppointmentGroup.Created immediately at
+// booking time, independent of payment, and already carries the booking's
+// UTMs, so the source shown here is the exact one from the booking link,
+// not a later best-guess. Never counted in any revenue total - this is
+// pipeline visibility only.
+router.get('/upcoming', async (req, res) => {
+  const brandId = req.user.brandId;
+  const { location, platform } = req.query;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(100, Number(req.query.limit) || 25);
+
+  try {
+    const matchStage = {
+      brandId: new mongoose.Types.ObjectId(brandId),
+      // Bounded to 60 days out - keeps this list to genuinely "upcoming"
+      // bookings and, just as importantly, keeps the per-row attribution
+      // lookup below from having to process an ever-growing, unbounded set.
+      appointmentDate: { $gte: new Date(), $lte: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000) },
+      status: 'created',
+      ...centerMatchClause(location),
+    };
+
+    // No $skip/$limit here (unlike /transactions) - platform is only known
+    // after the per-row attribution fallback below runs, which needs a
+    // customerId and can't happen inside the aggregation pipeline. Filtering
+    // and paging by platform therefore has to happen in JS, after every
+    // candidate row is resolved. Fine at this data's current volume; revisit
+    // if the upcoming-bookings list grows into the thousands.
+    const pipeline = [
+      { $match: matchStage },
+      { $lookup: { from: 'customers', localField: 'customerId', foreignField: '_id', as: 'customer' } },
+      { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+      { $lookup: { from: 'visits', localField: 'visitId', foreignField: '_id', as: 'visit' } },
+      { $unwind: { path: '$visit', preserveNullAndEmptyArrays: true } },
+      // A closed Invoice for this same zenotiInvoiceId means this booking
+      // already happened and got invoiced - it belongs in Transactions now,
+      // not in an "upcoming" list, even if appointmentDate is technically
+      // still in the future (e.g. a same-day walk-in add-on).
+      { $lookup: { from: 'invoices', localField: 'zenotiInvoiceId', foreignField: 'zenotiInvoiceId', as: 'existingInvoice' } },
+      { $match: { existingInvoice: { $size: 0 } } },
+      { $sort: { appointmentDate: 1 } },
+      {
+        $project: {
+          _id: 0,
+          appointmentId: '$_id',
+          invoiceNumber: '$invoiceNumber',
+          customerId: '$customerId',
+          customerName: '$customer.name',
+          email: '$customer.email',
+          services: '$serviceNames',
+          location: '$centerName',
+          utmSource: '$visit.utmSource',
+          utmCampaign: '$visit.utmCampaign',
+          appointmentDate: '$appointmentDate',
+          bookedAt: '$bookedAt',
+        },
+      },
+    ];
+
+    const rows = await Appointment.aggregate(pipeline);
+
+    // The booking-time Visit above only exists when Zenoti itself passed a
+    // utm_source on the AppointmentGroup.Created event, which is often
+    // missing. Whenever that leaves a row unattributed, fall back to the
+    // SAME attribution lookup conversionService uses at invoice-close time
+    // (searching all of this customer's visits, e.g. the real ad-click visit
+    // from the website, within the attribution window) - so a booking here
+    // shows the same source it will actually convert under, not a weaker
+    // guess based on one narrower signal.
+    // Run every row's attribution fallback concurrently rather than one at a
+    // time - this was the actual cause of the page hanging: a sequential
+    // await per row meant total load time scaled with row count.
+    const needsLookup = rows.some((row) => !row.utmSource && row.customerId);
+    const upcomingBrand = needsLookup ? await Brand.findById(brandId) : null;
+    await Promise.all(rows.map(async (row) => {
+      if (!row.utmSource && row.customerId) {
+        let { visit } = await pickAttributedVisit({ brandId, customerId: row.customerId, beforeTimestamp: row.appointmentDate, brand: upcomingBrand });
+        if (!visit) {
+          ({ visit } = await pickAttributedVisit({ brandId, customerId: row.customerId, beforeTimestamp: row.appointmentDate, requireClickId: false, brand: upcomingBrand }));
+        }
+        if (visit) {
+          row.utmSource = visit.utmSource || null;
+          row.utmCampaign = visit.utmCampaign || row.utmCampaign;
+        }
+      }
+      row.platform = row.utmSource || 'direct';
+      delete row.customerId;
+    }));
+
+    const availablePlatforms = [...new Set(rows.map((r) => r.platform))].sort();
+
+    const filtered = platform && platform !== 'all' ? rows.filter((r) => r.platform === platform) : rows;
+    const total = filtered.length;
+    const data = filtered.slice((page - 1) * limit, page * limit);
+
+    res.json({
+      bookings: data,
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      availablePlatforms,
+    });
+  } catch (err) {
+    console.error('dashboard upcoming error', err);
+    res.status(500).json({ error: 'Failed to build upcoming bookings list' });
   }
 });
 

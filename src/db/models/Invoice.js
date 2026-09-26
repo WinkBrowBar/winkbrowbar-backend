@@ -5,6 +5,8 @@ const invoiceSchema = new Schema({
   appointmentId: { type: Schema.Types.ObjectId, ref: 'Appointment', default: null },
   customerId: { type: Schema.Types.ObjectId, ref: 'Customer', default: null },
   zenotiInvoiceId: { type: String, required: true },
+  // Human-readable Zenoti number, e.g. "CH18816" (prefix + invoice_number).
+  invoiceNumber: { type: String, default: null },
   amount: { type: Number, required: true },
   isRefund: { type: Boolean, default: false },
   // No hardcoded default here anymore - zenotiWebhook.js now always sets

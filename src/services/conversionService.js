@@ -183,4 +183,4 @@ const conversionRecord = await Conversion.create({
   return results;
 }
 
-module.exports = { processInvoiceConversion };
+module.exports = { processInvoiceConversion, sendToPlatform };

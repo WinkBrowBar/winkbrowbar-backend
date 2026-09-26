@@ -16,6 +16,11 @@ const Visit = require('../db/models/Visit');
  * non-ad-click) conversion is guaranteed to find no visit at all, and its
  * campaign will always read "(no campaign)" regardless of email tagging.
  *
+ * Pass a prefetched `brand` doc when calling this in a loop over many rows
+ * (e.g. resolving attribution for a whole page of open invoices/bookings at
+ * once) - otherwise every single call re-fetches the same Brand document,
+ * which turns an N-row list into N (or 2N) redundant queries.
+ *
  * Only visits within the brand's attributionWindowDays (default 30) of the
  * purchase are eligible - without this, a months-old click would stay
  * matchable forever, since a returning direct visit never creates a new
@@ -23,8 +28,8 @@ const Visit = require('../db/models/Visit');
  * through to the organic/direct fallback in conversionService.js instead,
  * same as if there had never been a tracked visit at all.
  */
-async function pickAttributedVisit({ brandId, customerId, beforeTimestamp, requireClickId = true }) {
-  const brand = await Brand.findById(brandId);
+async function pickAttributedVisit({ brandId, customerId, beforeTimestamp, requireClickId = true, brand: prefetchedBrand }) {
+  const brand = prefetchedBrand || (await Brand.findById(brandId));
   const model = (brand && brand.attributionModel) || 'last_touch';
   const windowDays = (brand && brand.attributionWindowDays) || 30;
 
