@@ -18,28 +18,40 @@ class MetaConnector extends BaseConnector {
     const { pixelId, accessToken } = credentials;
     const { email, phone, amount, currency, orderId, eventTime } = conversionData;
 
+    const payload = {
+      data: [
+        {
+          event_name: 'Purchase',
+          event_time: Math.floor((eventTime || new Date()).getTime() / 1000),
+          action_source: 'system_generated', // offline conversion
+          user_data: {
+            em: email ? [this.hash(email)] : undefined,
+            ph: phone ? [this.hash(phone)] : undefined,
+          },
+          custom_data: {
+            currency: currency || 'INR',
+            value: amount,
+            order_id: orderId,
+          },
+        },
+      ],
+      access_token: accessToken,
+    };
+
+    // Meta's own dry-run mechanism: a test_event_code from Events Manager ->
+    // your pixel -> Test Events tab. Events sent with this code show up
+    // live in the Test Events panel instead of being recorded as real
+    // conversions on the pixel - lets us confirm the payload shape/fields
+    // are accepted before ever sending without it. Only added when the
+    // caller explicitly passes one (never on real sends).
+    if (conversionData.testEventCode) {
+      payload.test_event_code = conversionData.testEventCode;
+    }
+
     try {
       const response = await axios.post(
         `https://graph.facebook.com/v20.0/${pixelId}/events`,
-        {
-          data: [
-            {
-              event_name: 'Purchase',
-              event_time: Math.floor((eventTime || new Date()).getTime() / 1000),
-              action_source: 'system_generated', // offline conversion
-              user_data: {
-                em: email ? [this.hash(email)] : undefined,
-                ph: phone ? [this.hash(phone)] : undefined,
-              },
-              custom_data: {
-                currency: currency || 'INR',
-                value: amount,
-                order_id: orderId,
-              },
-            },
-          ],
-          access_token: accessToken,
-        },
+        payload,
         { timeout: 10000 }
       );
       return { success: true, response: response.data };

@@ -109,6 +109,16 @@ class GoogleConnector extends BaseConnector {
           // for a dry run. Always pass validateOnly: true first and confirm
           // a clean response with no field_warnings before ever sending real.
           validateOnly: conversionData.validateOnly === true,
+          // CONFIRMED REQUIRED as of 2026-09-28 (real API returned
+          // events.encoding / REQUIRED_FIELD_MISSING without it) - a
+          // top-level request field, not nested inside each event, despite
+          // the error path's dotted name suggesting otherwise. Value itself
+          // is NOT independently confirmed against Google's enum reference
+          // (their docs page wouldn't render the enum list) - "HEX" is the
+          // standard choice matching hash()'s .digest('hex') output above.
+          // If validateOnly still complains about this field, try "BASE64"
+          // next (would mean hash() also needs to switch to base64 output).
+          encoding: 'HEX',
         },
         {
           headers: {
