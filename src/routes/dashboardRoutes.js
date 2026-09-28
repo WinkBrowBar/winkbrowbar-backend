@@ -706,6 +706,19 @@ router.get('/transactions', async (req, res) => {
               { $ne: ['$platform', 'klaviyo'] },
               { $eq: ['$status', 'sent'] },
             ] } } },
+            // An invoice can end up with more than one non-klaviyo
+            // conversion record over time - e.g. an organic "direct" one
+            // created when it first closed, and a real "google"/"meta"/
+            // "awin" one added later once the actual ad-click attribution
+            // was found (by reconcileMisattributedConversions.js, or a
+            // late-arriving webhook). Without this sort, $limit: 1 below
+            // picks whichever one Mongo happens to return first - in
+            // practice the older "direct" record - which showed the wrong
+            // label on the Transactions page even though the real ad
+            // platform WAS correctly recorded. Always prefer a real ad
+            // platform's record over an organic/direct one.
+            { $addFields: { _platformPriority: { $cond: [{ $in: ['$platform', ['meta', 'google', 'awin']] }, 0, 1] } } },
+            { $sort: { _platformPriority: 1, createdAt: -1 } },
             { $limit: 1 },
           ],
           as: 'conversion',
