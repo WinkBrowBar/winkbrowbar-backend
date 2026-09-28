@@ -11,4 +11,3 @@
 //   - conversionActionId: must be the NUMERIC Google Ads conversion action
 //     ID (Goals -> Conversions -> click the action -> ID is numeric, e.g.
 //     876543210), NOT a gtag conversion label like "AW-xxx/nRNYCPvhl0..."
-/
