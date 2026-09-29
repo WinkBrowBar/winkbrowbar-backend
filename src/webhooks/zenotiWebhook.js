@@ -8,6 +8,7 @@ const Brand = require('../db/models/Brand');
 const { centerName } = require('../utils/centerNames');
 const { resolveIdentity } = require('../services/identityResolution');
 const { processInvoiceConversion } = require('../services/conversionService');
+const { centerLocalTimeToUtc } = require('../utils/centerTimezone');
 const router = express.Router();
 
 function verifySignature(req) {
@@ -263,7 +264,7 @@ async function handleEvent(brandId, event) {
     const startTimes = appts
       .map((a) => a.start_time_in_center || a.start_time)
       .filter(Boolean)
-      .map((t) => new Date(t));
+.map((t) => centerLocalTimeToUtc(t));
     const appointmentDate = startTimes.length ? new Date(Math.min(...startTimes)) : null;
 
     await Appointment.create({
@@ -321,7 +322,7 @@ async function handleEvent(brandId, event) {
       }
       if (isRescheduled) {
         update.wasRescheduled = true;
-        if (data.initial_appointment_start_time) update.originalAppointmentDate = new Date(data.initial_appointment_start_time);
+if (data.initial_appointment_start_time) update.originalAppointmentDate = centerLocalTimeToUtc(data.initial_appointment_start_time);
       }
       await Appointment.updateOne({ brandId, zenotiAppointmentGroupId: data.appointment_group_id }, { $set: update });
 
