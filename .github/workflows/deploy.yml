@@ -1,0 +1,39 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy application files
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "src,*.js,*.json,package-lock.json,package.json,shopify-snippet"
+          target: "/var/www/winkbrowser/current"
+          overwrite: true
+
+      - name: Install dependencies and restart app
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /var/www/winkbrowser/current
+
+            npm ci --omit=dev
+
+            pm2 restart winkbrowser-backend || pm2 start npm --name "winkbrowser-backend" -- start
+
+            pm2 save

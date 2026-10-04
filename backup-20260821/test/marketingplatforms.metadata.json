@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"brandId":{"$numberInt":"1"},"platform":{"$numberInt":"1"}},"name":"brandId_1_platform_1","background":true,"unique":true}],"uuid":"27876fd52b9240aa87959772102edb8e","collectionName":"marketingplatforms","type":"collection"}

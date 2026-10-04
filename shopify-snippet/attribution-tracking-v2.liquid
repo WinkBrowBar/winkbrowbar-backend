@@ -1,0 +1,80 @@
+<!--
+  Attribution capture snippet - v2.
+  Add this inside theme.liquid, just before </body>, AFTER the existing
+  AWIN dwin1.com script (this reads data that script already saves).
+
+  This version uses a per-brand PUBLIC CAPTURE TOKEN, not the internal API
+  key - safe to leave visible in page source. Generate a token first via:
+    POST /api/brands/:id/generate-capture-token
+-->
+<script>
+(function () {
+  var API_BASE_URL = "https://winkbrowbar-production.up.railway.app"; // your deployed backend
+var BRAND_ID = "6a61cca755da7f7407aec92e";
+var CAPTURE_TOKEN = "b8e2ba1a84ad1d8194bcf902d63a5eac5ec435d7cd8f04a4";
+
+  function getOrCreateVisitorId() {
+    var key = "attr_visitor_id";
+    var id = localStorage.getItem(key);
+    if (!id) {
+      id = "v_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem(key, id);
+    }
+    return id;
+  }
+
+  function getParam(name) {
+    var params = new URLSearchParams(window.location.search);
+    return params.get(name) || null;
+  }
+
+  // Reuse the AWIN click ID the existing AWIN tracking script on this site
+  // already saves to localStorage/cookies, instead of re-parsing separately.
+  // Falls back to reading ?awc= directly in case that script isn't present.
+  function getAwinClickId() {
+    var stored = localStorage.getItem("awin_click_id");
+    if (stored) return stored;
+
+    var cookies = document.cookie.split(";");
+    for (var i = 0; i < cookies.length; i++) {
+      var c = cookies[i].trim();
+      if (c.indexOf("_aw_sn_") === 0 || c.indexOf("_awc_") === 0) {
+        return c.substring(c.indexOf("=") + 1);
+      }
+    }
+    return getParam("awc");
+  }
+
+  // Only capture once per session per landing (avoid duplicate rows on every internal click)
+  var alreadyCapturedThisLoad = sessionStorage.getItem("attr_captured_this_load");
+  if (alreadyCapturedThisLoad) return;
+  sessionStorage.setItem("attr_captured_this_load", "1");
+
+  var payload = {
+    brandId: BRAND_ID,
+    visitorId: getOrCreateVisitorId(),
+    utmSource: getParam("utm_source"),
+    utmMedium: getParam("utm_medium"),
+    utmCampaign: getParam("utm_campaign"),
+    utmContent: getParam("utm_content"),
+    utmTerm: getParam("utm_term"),
+    landingPageUrl: window.location.href,
+    referrer: document.referrer || null,
+    gclid: getParam("gclid"),
+    fbclid: getParam("fbclid"),
+    awinClickId: getAwinClickId(),
+  };
+
+  var hasSignal = payload.utmSource || payload.gclid || payload.fbclid || payload.awinClickId;
+  if (!hasSignal) return;
+
+  fetch(API_BASE_URL + "/api/attribution/capture", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-capture-token": CAPTURE_TOKEN },
+    body: JSON.stringify(payload),
+    keepalive: true,
+  }).catch(function (err) {
+    console.warn("Attribution capture failed", err);
+  });
+})();
+</script>
