@@ -966,7 +966,11 @@ router.get('/upcoming', async (req, res) => {
       // bookings and, just as importantly, keeps the per-row attribution
       // lookup below from having to process an ever-growing, unbounded set.
       appointmentDate: { $gte: new Date(), $lte: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000) },
-      status: 'created',
+      // Cancelled bookings are now shown too (with a Cancelled badge on the
+      // frontend) instead of just vanishing from the list - still excluded
+      // from totalEstimatedValue below, since a cancelled booking isn't
+      // real upcoming revenue anymore.
+      status: { $in: ['created', 'cancelled'] },
       ...centerMatchClause(location),
     };
 
@@ -994,6 +998,7 @@ router.get('/upcoming', async (req, res) => {
           _id: 0,
           appointmentId: '$_id',
           invoiceNumber: '$invoiceNumber',
+          status: '$status',
           customerId: '$customerId',
           customerName: '$customer.name',
           email: '$customer.email',
@@ -1045,7 +1050,9 @@ router.get('/upcoming', async (req, res) => {
 
     const filtered = platform && platform !== 'all' ? rows.filter((r) => r.platform === platform) : rows;
     const total = filtered.length;
-    const totalEstimatedValue = filtered.reduce((sum, r) => sum + (r.estimatedValue || 0), 0);
+    const totalEstimatedValue = filtered
+      .filter((r) => r.status !== 'cancelled')
+      .reduce((sum, r) => sum + (r.estimatedValue || 0), 0);
     const data = filtered.slice((page - 1) * limit, page * limit);
 
     res.json({
