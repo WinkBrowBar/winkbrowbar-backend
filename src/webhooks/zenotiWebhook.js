@@ -9,6 +9,7 @@ const { centerName } = require('../utils/centerNames');
 const { resolveIdentity } = require('../services/identityResolution');
 const { processInvoiceConversion } = require('../services/conversionService');
 const { centerLocalTimeToUtc } = require('../utils/centerTimezone');
+const { lookupGuestByEmail, lookupGuestById, customerTypeFromGuest } = require('../services/zenotiGuestLookup');
 const router = express.Router();
 
 function verifySignature(req) {
@@ -266,6 +267,22 @@ async function handleEvent(brandId, event) {
       .filter(Boolean)
 .map((t) => centerLocalTimeToUtc(t));
     const appointmentDate = startTimes.length ? new Date(Math.min(...startTimes)) : null;
+    const bookedAt = event.event_timestamp ? new Date(event.event_timestamp) : new Date();
+
+    // New-vs-returning checked HERE, at booking time, not at invoice close -
+    // for an online booking with a deposit, bookedAt is effectively the
+    // payment moment too (see bookedAt's own comment on the model), so this
+    // is the earliest real signal exists. invoice.closed later reuses this
+    // same tag (matched by zenotiInvoiceId) instead of looking the guest up
+    // again - one Zenoti call per visit, not two.
+    let customerType = null;
+    if (customer || guest.id) {
+      let zenotiGuest = await lookupGuestByEmail((customer && customer.email) || guest.email);
+      if (!zenotiGuest && guest.id) {
+        zenotiGuest = await lookupGuestById(guest.id);
+      }
+      customerType = customerTypeFromGuest(zenotiGuest, bookedAt);
+    }
 
     await Appointment.create({
       brandId,
@@ -273,7 +290,7 @@ async function handleEvent(brandId, event) {
       zenotiGuestId: guest.id,
       zenotiAppointmentGroupId: data.appointment_group_id,
       status: 'created',
-      bookedAt: event.event_timestamp ? new Date(event.event_timestamp) : new Date(),
+      bookedAt,
       appointmentDate,
       serviceNames,
       centerName: data.center_Name || data.center_name || centerName(data.center_id) || null,
@@ -281,6 +298,7 @@ async function handleEvent(brandId, event) {
       invoiceNumber: data.invoice_number ? `${data.invoice_number_prefix || ''}${data.invoice_number}` : null,
       visitId: visit ? visit._id : null,
       rebookedFromGroupId: data.rebooked_source_group_id || null,
+      customerType,
     });
 
     // Per Zenoti support: a reschedule creates a brand-new appointment group

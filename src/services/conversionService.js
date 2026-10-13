@@ -189,10 +189,12 @@
 
 const Invoice = require('../db/models/Invoice');
 const Customer = require('../db/models/Customer');
+const Appointment = require('../db/models/Appointment');
 const MarketingPlatform = require('../db/models/MarketingPlatform');
 const Conversion = require('../db/models/Conversion');
 const { pickAttributedVisit, platformFromVisit } = require('./attribution');
 const { getConnector } = require('../connectors');
+const { lookupGuestByEmail, lookupGuestById, customerTypeFromGuest } = require('./zenotiGuestLookup');
 
 // Decision 2026-09-28: this system tracks which ad platform a sale came
 // from for OUR OWN internal reporting/dashboard only. It must never send
@@ -292,17 +294,35 @@ async function processInvoiceConversion({ brandId, invoiceId }) {
     // actually succeeded - doing this earlier meant a retry (e.g. after a
     // transient failure) could double-count the same invoice's revenue.
     const invoiceClosedAt = invoice.closedAt || new Date();
-    // Decide new-vs-returning from OUR OWN db, at the instant it's known -
-    // no Zenoti API call here (the only endpoint this account's key can
-    // call, the Sales Accrual Report, takes ~a minute for 2 years of data
-    // and can't be filtered to one guest, so it's far too slow/heavy to run
-    // synchronously inside every single webhook). This tag can be wrong in
-    // one direction only - mislabeling a genuinely-returning customer as
-    // "new" if their real history predates our tracking.
-    // reconcileCustomerTypeViaZenoti.js runs nightly and corrects exactly
-    // that, using Zenoti's real 2-year history, same pattern already
-    // proven out in confirmNewCustomersViaZenoti.js.
-    invoice.customerType = customer.firstPurchaseDate ? 'returning' : 'new';
+    // New-vs-returning was already checked at BOOKING time, not here, when
+    // this invoice came from a real booking (zenotiWebhook.js's
+    // appointment.created handler) - reuse that tag by matching
+    // zenotiInvoiceId, instead of spending a second Zenoti call on the same
+    // guest/visit. Only for a walk-in with no prior booking event (no
+    // matching Appointment at all) does this do its own live Zenoti call.
+    let zenotiCustomerType = null;
+    const bookingAppointment = await Appointment.findOne({ brandId, zenotiInvoiceId: invoice.zenotiInvoiceId }).lean();
+    if (bookingAppointment && bookingAppointment.customerType) {
+      zenotiCustomerType = bookingAppointment.customerType;
+    } else {
+      // Send this customer's email to Zenoti directly (confirmed working
+      // 2026-10-13 - GET /v1/guests/search?email=..., a single lightweight
+      // call, not the heavy Sales Accrual Report) and compare the guest
+      // profile's created_date - Zenoti's own real history - to this
+      // invoice's close time. This is why we check Zenoti instead of just
+      // our own db: our own tracking only goes back so far, Zenoti's guest
+      // history goes back the customer's full real history.
+      let guest = await lookupGuestByEmail(customer.email);
+      if (!guest && customer.zenotiGuestId) {
+        guest = await lookupGuestById(customer.zenotiGuestId);
+      }
+      zenotiCustomerType = customerTypeFromGuest(guest, invoiceClosedAt);
+    }
+    // Falls back to the old db-only guess (first invoice we've ever seen
+    // for this customer) only if neither the booking tag nor a fresh Zenoti
+    // call could determine it - never lets a Zenoti hiccup block invoice
+    // processing.
+    invoice.customerType = zenotiCustomerType || (customer.firstPurchaseDate ? 'returning' : 'new');
     await invoice.save();
     customer.lifetimeRevenue = (customer.lifetimeRevenue || 0) + Number(invoice.amount);
     if (!customer.firstPurchaseDate) {

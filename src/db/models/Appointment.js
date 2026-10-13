@@ -37,6 +37,15 @@ const appointmentSchema = new Schema({
   // this is the ad source/campaign attributed to this specific booking,
   // straight from Zenoti's booking-link UTMs, not a later guess.
   visitId: { type: Schema.Types.ObjectId, ref: 'Visit', default: null },
+  // Checked live against Zenoti at BOOKING time (not invoice-close time) -
+  // see the appointment.created handler in zenotiWebhook.js. For an online
+  // booking with a deposit, bookedAt IS effectively the payment moment
+  // (same reasoning as bookedAt's own comment above), so this is the
+  // earliest point a real new-vs-returning signal exists. Carried over to
+  // Invoice.customerType later (by matching zenotiInvoiceId) instead of
+  // looking the guest up again at close time - one Zenoti call per guest
+  // per visit, not two.
+  customerType: { type: String, enum: ['new', 'returning', null], default: null },
 }, { timestamps: true });
 
 appointmentSchema.index({ brandId: 1, zenotiAppointmentGroupId: 1 });

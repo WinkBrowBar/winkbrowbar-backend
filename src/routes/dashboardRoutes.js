@@ -1040,6 +1040,7 @@ router.get('/upcoming', async (req, res) => {
           utmCampaign: '$visit.utmCampaign',
           appointmentDate: '$appointmentDate',
           bookedAt: '$bookedAt',
+          customerType: '$customerType',
         },
       },
     ];
