@@ -23,6 +23,14 @@ items: [{
   tax: { type: Number, default: 0 },
   // Idempotency guard for conversionService.js.
   conversionsProcessedAt: { type: Date, default: null },
+  // Set once, at invoice-close time, in conversionService.js -
+  // 'new' if this was the customer's first-ever closed invoice in OUR db at
+  // that moment, 'returning' otherwise. Stays null for invoices that are
+  // still open (set only when conversions are processed on close).
+  // reconcileCustomerTypeViaZenoti.js later corrects any 'new' tag to
+  // 'returning' if Zenoti's own 2-year history shows an earlier purchase we
+  // didn't know about (e.g. a pre-tracking-era customer) - see that script.
+  customerType: { type: String, enum: ['new', 'returning', null], default: null },
 }, { timestamps: true });
 
 invoiceSchema.index({ brandId: 1, zenotiInvoiceId: 1 }, { unique: true });

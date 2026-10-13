@@ -292,6 +292,18 @@ async function processInvoiceConversion({ brandId, invoiceId }) {
     // actually succeeded - doing this earlier meant a retry (e.g. after a
     // transient failure) could double-count the same invoice's revenue.
     const invoiceClosedAt = invoice.closedAt || new Date();
+    // Decide new-vs-returning from OUR OWN db, at the instant it's known -
+    // no Zenoti API call here (the only endpoint this account's key can
+    // call, the Sales Accrual Report, takes ~a minute for 2 years of data
+    // and can't be filtered to one guest, so it's far too slow/heavy to run
+    // synchronously inside every single webhook). This tag can be wrong in
+    // one direction only - mislabeling a genuinely-returning customer as
+    // "new" if their real history predates our tracking.
+    // reconcileCustomerTypeViaZenoti.js runs nightly and corrects exactly
+    // that, using Zenoti's real 2-year history, same pattern already
+    // proven out in confirmNewCustomersViaZenoti.js.
+    invoice.customerType = customer.firstPurchaseDate ? 'returning' : 'new';
+    await invoice.save();
     customer.lifetimeRevenue = (customer.lifetimeRevenue || 0) + Number(invoice.amount);
     if (!customer.firstPurchaseDate) {
       customer.firstPurchaseDate = invoiceClosedAt;

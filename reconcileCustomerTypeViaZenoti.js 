@@ -1,0 +1,190 @@
+// reconcileCustomerTypeViaZenoti.js
+//
+// Generalizes confirmNewCustomersViaZenoti.js (which only audited Google
+// conversions, and only printed findings) into something that actually
+// WRITES the correct tag, for every invoice, regardless of platform.
+//
+// Why this exists: Invoice.customerType is set instantly at invoice-close
+// time (conversionService.js) using ONLY our own db's
+// Customer.firstPurchaseDate - that's a zero-API-call, zero-latency check,
+// but it only knows what we've synced. A customer who bought from you a
+// year before this tracking system existed (or whose zenotiGuestId wasn't
+// captured yet at their very first visit) can get mislabeled "new".
+//
+// This runs on a schedule (cron, nightly) and corrects exactly that one
+// failure mode: it pulls Zenoti's own real Sales Accrual Report (the only
+// endpoint this account's API key is authorized for - confirmed in
+// reconcileZenotiInvoices.js; a direct per-guest lookup would need to call
+// this same heavy, unfilterable-by-guest endpoint anyway, so it's done
+// once a night in bulk here rather than per-webhook) going back
+// `zenotiDaysBack` days, builds the earliest-invoice-date-per-guest index,
+// and for every Invoice currently tagged customerType:'new', flips it to
+// 'returning' if Zenoti shows a real earlier purchase for that guest.
+//
+// Never flips 'returning' -> 'new' (our own db is always right about SOME
+// earlier purchase existing; Zenoti can only ever reveal an EARLIER one we
+// didn't know about, never un-reveal one we already found).
+//
+// Requires (NOT the webhook secret):
+//   ZENOTI_API_BASE=https://api.zenoti.com   (or your region's API host)
+//   ZENOTI_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+//
+// Usage:
+//   node reconcileCustomerTypeViaZenoti.js --brand=<brandId or slug> [--days=730] [--dry-run]
+
+require('dotenv').config();
+const mongoose = require('mongoose');
+const axios = require('axios');
+const { connectDB } = require('./src/db/connection');
+const Brand = require('./src/db/models/Brand');
+const Invoice = require('./src/db/models/Invoice');
+const Customer = require('./src/db/models/Customer');
+
+const DRY_RUN = process.argv.includes('--dry-run');
+
+function argValue(name) {
+  const match = process.argv.find((a) => a.startsWith(`--${name}=`));
+  return match ? match.split('=').slice(1).join('=') : null;
+}
+
+const ZENOTI_API_BASE = process.env.ZENOTI_API_BASE || 'https://api.zenoti.com';
+const ZENOTI_API_KEY = process.env.ZENOTI_API_KEY;
+const REPORT_URL = `${ZENOTI_API_BASE}/v1/reports/sales/accrual_basis/flat_file`;
+const MAX_CHUNK_DAYS = 350;
+
+async function fetchAllSalesRows({ startDate, endDate }) {
+  const all = [];
+  let page = 1;
+  const size = 200;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data } = await axios.post(
+      REPORT_URL,
+      { start_date: startDate, end_date: endDate },
+      { params: { Page: page, Size: size }, headers: { Authorization: `apikey ${ZENOTI_API_KEY}`, 'Content-Type': 'application/json' } }
+    );
+    const batch = data.sales || [];
+    all.push(...batch);
+    const total = data.page_info ? data.page_info.total : batch.length;
+    if (all.length >= total || batch.length < size) break;
+    page += 1;
+  }
+  return all;
+}
+
+(async () => {
+  if (!ZENOTI_API_KEY) {
+    console.error('ZENOTI_API_KEY is not set in .env');
+    process.exit(1);
+  }
+
+  const brandArg = argValue('brand');
+  if (!brandArg) {
+    console.error('Usage: node reconcileCustomerTypeViaZenoti.js --brand=<brandId or slug> [--days=730] [--dry-run]');
+    process.exit(1);
+  }
+
+  await connectDB();
+
+  const brand = mongoose.isValidObjectId(brandArg)
+    ? await Brand.findById(brandArg)
+    : await Brand.findOne({ slug: brandArg });
+  if (!brand) {
+    console.error(`No brand found for "${brandArg}"`);
+    process.exit(1);
+  }
+
+  const zenotiDaysBack = Number(argValue('days')) || 730;
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - zenotiDaysBack);
+
+  console.log(`\nFetching Zenoti's full sales history for the last ${zenotiDaysBack} days (this may take a minute - chunked into <=${MAX_CHUNK_DAYS}-day windows)...\n`);
+
+  const chunks = [];
+  let chunkEnd = new Date(end);
+  while (chunkEnd > start) {
+    const chunkStart = new Date(chunkEnd);
+    chunkStart.setDate(chunkStart.getDate() - MAX_CHUNK_DAYS);
+    if (chunkStart < start) chunkStart.setTime(start.getTime());
+    chunks.push({ start: new Date(chunkStart), end: new Date(chunkEnd) });
+    chunkEnd = new Date(chunkStart);
+    chunkEnd.setDate(chunkEnd.getDate() - 1);
+  }
+
+  const earliestByGuestId = new Map(); // guest_id -> earliest invoice_date seen
+
+  for (const [i, chunk] of chunks.entries()) {
+    const startStr = `${chunk.start.toISOString().slice(0, 10)}T00:00:00`;
+    const endStr = `${chunk.end.toISOString().slice(0, 10)}T23:59:59`;
+    console.log(`Fetching chunk ${i + 1}/${chunks.length}: ${startStr} -> ${endStr} ...`);
+    const rows = await fetchAllSalesRows({ startDate: startStr, endDate: endStr });
+    console.log(`  -> ${rows.length} row(s)`);
+
+    for (const row of rows) {
+      const guestId = row.guest_id;
+      if (!guestId) continue;
+      const invDate = row.invoice_date || row.sale_date;
+      if (!invDate) continue;
+      const existing = earliestByGuestId.get(guestId);
+      if (!existing || new Date(invDate) < new Date(existing)) {
+        earliestByGuestId.set(guestId, invDate);
+      }
+    }
+  }
+
+  console.log(`\nBuilt earliest-purchase-date index for ${earliestByGuestId.size} distinct Zenoti guest(s).\n`);
+
+  // Every invoice we currently call "new", across ALL platforms - not just
+  // Google like the old audit script.
+  const newInvoices = await Invoice.find({ brandId: brand._id, customerType: 'new' }).lean();
+  console.log(`Cross-checking ${newInvoices.length} invoice(s) currently tagged "new" against Zenoti's real history...\n`);
+
+  let confirmedNew = 0;
+  let flippedToReturning = 0;
+  let noZenotiData = 0;
+
+  for (const invoice of newInvoices) {
+    const customer = invoice.customerId ? await Customer.findById(invoice.customerId).lean() : null;
+    if (!customer) continue;
+
+    const invoiceDay = new Date(invoice.closedAt).toISOString().slice(0, 10);
+    const name = customer.name || customer.email || '(unknown)';
+    const invNum = invoice.invoiceNumber || invoice.zenotiInvoiceId;
+
+    if (!customer.zenotiGuestId) {
+      console.log(`${name} | invoice ${invNum} -> no zenotiGuestId on file, cannot cross-check`);
+      noZenotiData++;
+      continue;
+    }
+
+    const zenotiEarliest = earliestByGuestId.get(customer.zenotiGuestId);
+    if (!zenotiEarliest) {
+      console.log(`${name} | invoice ${invNum} -> not found in Zenoti's ${zenotiDaysBack}-day report at all (genuinely new, or older than the window checked)`);
+      noZenotiData++;
+      continue;
+    }
+
+    const zenotiEarliestDay = new Date(zenotiEarliest).toISOString().slice(0, 10);
+    if (zenotiEarliestDay < invoiceDay) {
+      console.log(`${name} | invoice ${invNum} -> FLIPPING to returning - Zenoti shows an earlier purchase on ${zenotiEarliestDay}`);
+      flippedToReturning++;
+      if (!DRY_RUN) {
+        await Invoice.updateOne({ _id: invoice._id }, { $set: { customerType: 'returning' } });
+      }
+    } else {
+      confirmedNew++;
+    }
+  }
+
+  console.log(`\n--- Summary ---`);
+  console.log(`Confirmed genuinely new (Zenoti agrees):            ${confirmedNew}`);
+  console.log(`Flipped new -> returning (Zenoti disagreed):        ${flippedToReturning}${DRY_RUN ? ' (dry run - not written)' : ''}`);
+  console.log(`Could not cross-check (no guest id / not in window): ${noZenotiData}`);
+  console.log(`\nDone.`);
+
+  process.exit(0);
+})().catch((err) => {
+  console.error('Failed:', err.response ? JSON.stringify(err.response.data) : err.message);
+  process.exit(1);
+});

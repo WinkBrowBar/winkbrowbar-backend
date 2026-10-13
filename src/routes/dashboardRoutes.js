@@ -678,7 +678,7 @@ router.get('/trend', async (req, res) => {
 router.get('/transactions', async (req, res) => {
   const brandId = req.user.brandId;
   const { since, until } = resolveRange(req.query);
-  const { search, platform, location, status } = req.query;
+  const { search, platform, location, status, customerType } = req.query;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Number(req.query.limit) || 25);
 
@@ -689,6 +689,10 @@ router.get('/transactions', async (req, res) => {
       status: statusFilter, // list only - revenue endpoints still count closed only
       closedAt: { $gte: since, $lte: until },
       ...centerMatchClause(location),
+      // customerType is set directly on Invoice at close time (see
+      // conversionService.js) - null for open invoices, so filtering to
+      // 'new' or 'returning' naturally excludes anything still open.
+      ...(customerType === 'new' || customerType === 'returning' ? { customerType } : {}),
     };
 
     const pipeline = [
@@ -780,6 +784,7 @@ router.get('/transactions', async (req, res) => {
                 campaign: '$campaign',
                 purchaseDate: '$closedAt',
                 status: '$status',
+                customerType: '$customerType',
               },
             },
           ],
@@ -946,6 +951,31 @@ async function getAverageServicePrices(brandId) {
   return map;
 }
 
+// Same shape as resolveRange, but forward-looking - "days" means the next N
+// days from today, not the last N. A startDate/endDate pair (the custom
+// range filter on the Upcoming page) is used literally as the
+// appointmentDate window instead. Still bounded by MAX_UPCOMING_WINDOW_DAYS
+// even with an explicit range, for the same reason the old hardcoded 60-day
+// cap existed - the per-row attribution lookup below isn't paginated, so an
+// unbounded window would make that scale with however far out someone asks.
+const MAX_UPCOMING_WINDOW_DAYS = 365;
+function resolveUpcomingRange(query) {
+  const { startDate, endDate, days } = query;
+
+  if (startDate || endDate) {
+    const since = startDate ? new Date(startDate) : new Date();
+    since.setHours(0, 0, 0, 0);
+    const requestedUntil = endDate ? new Date(endDate) : new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+    requestedUntil.setHours(23, 59, 59, 999);
+    const maxUntil = new Date(since.getTime() + MAX_UPCOMING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const until = requestedUntil > maxUntil ? maxUntil : requestedUntil;
+    return { since, until, custom: true };
+  }
+
+  const windowDays = Math.min(Number(days) || 60, MAX_UPCOMING_WINDOW_DAYS);
+  return { since: new Date(), until: new Date(Date.now() + windowDays * 24 * 60 * 60 * 1000), custom: false };
+}
+
 // Bookings that exist in Zenoti (guest booked, deposit or full payment may
 // or may not have happened) but haven't turned into a closed - or even
 // open - Invoice yet. Zenoti fires AppointmentGroup.Created immediately at
@@ -956,16 +986,18 @@ async function getAverageServicePrices(brandId) {
 router.get('/upcoming', async (req, res) => {
   const brandId = req.user.brandId;
   const { location, platform } = req.query;
+  const { since, until } = resolveUpcomingRange(req.query);
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Number(req.query.limit) || 25);
 
   try {
     const matchStage = {
       brandId: new mongoose.Types.ObjectId(brandId),
-      // Bounded to 60 days out - keeps this list to genuinely "upcoming"
-      // bookings and, just as importantly, keeps the per-row attribution
-      // lookup below from having to process an ever-growing, unbounded set.
-      appointmentDate: { $gte: new Date(), $lte: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000) },
+      // Bounded - see resolveUpcomingRange above - keeps this list to
+      // genuinely "upcoming" bookings and, just as importantly, keeps the
+      // per-row attribution lookup below from having to process an
+      // ever-growing, unbounded set.
+      appointmentDate: { $gte: since, $lte: until },
       // Cancelled bookings are now shown too (with a Cancelled badge on the
       // frontend) instead of just vanishing from the list - still excluded
       // from totalEstimatedValue below, since a cancelled booking isn't
