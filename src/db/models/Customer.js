@@ -24,6 +24,18 @@ const customerSchema = new Schema({
 
 customerSchema.index({ brandId: 1, email: 1 });
 customerSchema.index({ brandId: 1, phone: 1 });
-customerSchema.index({ brandId: 1, zenotiGuestId: 1 });
+// Unique (not just indexed) wherever zenotiGuestId is actually set - closes
+// the race in identityResolution.js where two near-simultaneous webhooks
+// for the same guest (e.g. appointment.created and invoice.closed arriving
+// a few ms apart) each found no existing Customer and both created one,
+// splitting one real person across two docs (seen live: Tia Bell, one doc
+// had her email/phone, the other - the one an invoice ended up pointing at
+// - had neither). partialFilterExpression so the many Customer docs with
+// no zenotiGuestId at all (identified only by email, never linked to
+// Zenoti) don't collide with each other on an implicit null-equals-null.
+customerSchema.index(
+  { brandId: 1, zenotiGuestId: 1 },
+  { unique: true, partialFilterExpression: { zenotiGuestId: { $type: 'string' } } },
+);
 
 module.exports = model('Customer', customerSchema);

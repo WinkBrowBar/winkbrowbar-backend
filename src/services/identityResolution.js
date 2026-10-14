@@ -23,8 +23,26 @@ async function resolveIdentity({ brandId, visitorId, email, phone, name, zenotiG
 
   // 2. Create if not found
   if (!customer) {
-    customer = await Customer.create({ brandId, email, phone, name, zenotiGuestId });
-  } else {
+    try {
+      customer = await Customer.create({ brandId, email, phone, name, zenotiGuestId });
+    } catch (err) {
+      // E11000 on the (brandId, zenotiGuestId) unique index - a concurrent
+      // call to resolveIdentity for this same guest (two Zenoti webhooks
+      // landing a few ms apart is the normal trigger) won this exact race
+      // and created the Customer first. Don't create a second, split
+      // record for the same real person - pick up the one that won and
+      // fall through to the update branch below so this call's fields
+      // (which may have info the winner's call didn't) still get applied.
+      if (err.code === 11000 && zenotiGuestId) {
+        customer = await Customer.findOne({ brandId, zenotiGuestId });
+      }
+      if (!customer) throw err;
+    }
+  }
+  // Applies on both the "found existing" path and the "lost the create
+  // race, picked up the winner" path above - harmless no-op extra save on
+  // the plain "just created it myself" path.
+  if (customer) {
     if (email) customer.email = email;
     if (phone) customer.phone = phone;
     if (name) customer.name = name;
