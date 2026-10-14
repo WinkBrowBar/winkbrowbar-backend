@@ -27,7 +27,7 @@ const { connectDB } = require('./src/db/connection');
 const Brand = require('./src/db/models/Brand');
 const Invoice = require('./src/db/models/Invoice');
 const Customer = require('./src/db/models/Customer');
-const { lookupGuestByEmail, customerTypeFromGuest } = require('./src/services/zenotiGuestLookup');
+const { determineCustomerType } = require('./src/services/zenotiGuestLookup');
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
@@ -104,12 +104,11 @@ async function runWithConcurrency(items, concurrency, worker) {
     const laterInvoices = customerInvoices.slice(1);
 
     let earliestType;
-    if (!customer || !customer.email) {
+    if (!customer || (!customer.email && !customer.zenotiGuestId)) {
       noEmail++;
       earliestType = 'new'; // same assumption the old db-only guess made
     } else {
-      const guest = await lookupGuestByEmail(customer.email);
-      const zenotiType = customerTypeFromGuest(guest, earliest.closedAt);
+      const zenotiType = await determineCustomerType({ email: customer.email, zenotiGuestId: customer.zenotiGuestId, atDate: earliest.closedAt });
       if (zenotiType) {
         earliestType = zenotiType;
         if (zenotiType === 'new') newConfirmed++; else returningTagged++;

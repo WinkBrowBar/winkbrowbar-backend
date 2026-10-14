@@ -9,7 +9,7 @@ const { centerName } = require('../utils/centerNames');
 const { resolveIdentity } = require('../services/identityResolution');
 const { processInvoiceConversion } = require('../services/conversionService');
 const { centerLocalTimeToUtc } = require('../utils/centerTimezone');
-const { lookupGuestByEmail, lookupGuestById, customerTypeFromGuest } = require('../services/zenotiGuestLookup');
+const { determineCustomerType } = require('../services/zenotiGuestLookup');
 const router = express.Router();
 
 function verifySignature(req) {
@@ -274,14 +274,16 @@ async function handleEvent(brandId, event) {
     // payment moment too (see bookedAt's own comment on the model), so this
     // is the earliest real signal exists. invoice.closed later reuses this
     // same tag (matched by zenotiInvoiceId) instead of looking the guest up
-    // again - one Zenoti call per visit, not two.
+    // again - one Zenoti call per visit, not two. excludeAppointmentGroupId
+    // stops this exact booking from counting as its own "earlier" visit.
     let customerType = null;
     if (customer || guest.id) {
-      let zenotiGuest = await lookupGuestByEmail((customer && customer.email) || guest.email);
-      if (!zenotiGuest && guest.id) {
-        zenotiGuest = await lookupGuestById(guest.id);
-      }
-      customerType = customerTypeFromGuest(zenotiGuest, bookedAt);
+      customerType = await determineCustomerType({
+        email: (customer && customer.email) || guest.email,
+        zenotiGuestId: guest.id,
+        atDate: bookedAt,
+        excludeAppointmentGroupId: data.appointment_group_id,
+      });
     }
 
     await Appointment.create({

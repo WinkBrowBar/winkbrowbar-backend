@@ -20,12 +20,14 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Retries a 429 ("Account quota exceeded") a few times with backoff - a
-// single transient throttle, not the whole quota, usually clears within a
-// few seconds. If it's still 429 after all retries, this almost certainly
-// IS the whole account quota exhausted (e.g. a daily cap) - no amount of
-// retrying from here will fix that; the caller gets null and falls back,
-// same as any other failure.
+// Retries a 429 ("Account quota exceeded") a few times with backoff.
+// Confirmed against Zenoti's own docs (docs.zenoti.com/docs/api-rate-limits-1):
+// this is a sliding 60-calls-PER-MINUTE limit that continuously refills,
+// NOT a daily cap - so a short in-process backoff here can genuinely
+// succeed if this call just caught the tail end of a busy window. If it's
+// still 429 after all retries, the caller gets null and falls back to its
+// own next option (a longer cooldown at the script level, or a db-only
+// guess) - never treat this as "nothing will work until tomorrow".
 async function getWithRetry(url, config, { retries = 3, baseDelayMs = 2000 } = {}) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -74,15 +76,60 @@ async function lookupGuestById(guestId) {
   }
 }
 
+// Confirmed working 2026-10-13 (checkZenotiGuestHistory.js, investigating a
+// real mislabel on Cynthia Johnson / invoice WV25491): GET
+// /v1/guests/{id}/appointments returns the guest's REAL appointment/invoice
+// history - the same data Zenoti's own "Past Treatments" tab shows. This is
+// stronger ground truth than guest.created_date (a single profile-creation
+// timestamp) - it's an actual list of past visits, so "does an earlier one
+// exist" is a direct fact, not an inference. Used as the primary signal;
+// created_date is now only the fallback if this endpoint itself fails.
+async function lookupGuestAppointments(guestId) {
+  if (!guestId || !ZENOTI_API_KEY) return null;
+  try {
+    const { data } = await getWithRetry(`${ZENOTI_API_BASE}/v1/guests/${guestId}/appointments`, {
+      headers: { Authorization: `apikey ${ZENOTI_API_KEY}` },
+      timeout: 10000,
+    });
+    return data && Array.isArray(data.appointments) ? data.appointments : null;
+  } catch (err) {
+    console.error(`zenotiGuestLookup (appointments) failed for ${guestId}:`, err.response ? JSON.stringify(err.response.data) : err.message);
+    return null;
+  }
+}
+
+function earliestServiceStart(appointment) {
+  const services = Array.isArray(appointment.appointment_services) ? appointment.appointment_services : [];
+  const times = services.map((s) => s.start_time).filter(Boolean).map((t) => new Date(t)).filter((d) => !Number.isNaN(d.getTime()));
+  return times.length ? new Date(Math.min(...times)) : null;
+}
+
+// Returns 'new' | 'returning' | null (null = this endpoint gave nothing
+// usable - caller falls back to customerTypeFromGuest/created_date).
+// 'returning' the moment ANY other appointment on this guest's real history
+// has a service start time strictly before `beforeDate` - excluding the
+// appointment group this exact transaction came from, so a booking doesn't
+// count itself as its own "earlier" visit.
+function customerTypeFromAppointmentHistory(appointments, { beforeDate, excludeAppointmentGroupId } = {}) {
+  if (!Array.isArray(appointments)) return null;
+  const before = new Date(beforeDate);
+  if (Number.isNaN(before.getTime())) return null;
+  const hasEarlierVisit = appointments.some((appt) => {
+    if (excludeAppointmentGroupId && appt.appointment_group_id === excludeAppointmentGroupId) return false;
+    const start = earliestServiceStart(appt);
+    return start && start < before;
+  });
+  return hasEarlierVisit ? 'returning' : 'new';
+}
+
 // How long after the guest profile was created do we still call this
 // purchase "new"? Not same-day-only, because a guest profile is often
 // created at BOOKING time, a few days before the actual visit/invoice
 // close - 72h covers that normal gap without stretching so far it starts
-// calling a real returning customer "new".
+// calling a real returning customer "new". Only used as a fallback now -
+// see customerTypeFromAppointmentHistory above for the primary check.
 const NEW_GUEST_WINDOW_HOURS = 72;
 
-// Returns 'new' | 'returning' | null (null = couldn't determine from
-// Zenoti - caller should fall back to the db-based guess).
 function customerTypeFromGuest(guest, invoiceClosedAt) {
   if (!guest || !guest.created_date) return null;
   const createdAt = new Date(guest.created_date);
@@ -96,4 +143,33 @@ function customerTypeFromGuest(guest, invoiceClosedAt) {
   return hoursBetween <= NEW_GUEST_WINDOW_HOURS ? 'new' : 'returning';
 }
 
-module.exports = { lookupGuestByEmail, lookupGuestById, customerTypeFromGuest, NEW_GUEST_WINDOW_HOURS };
+// Single entry point every call site should use. Tries, in order:
+//   1. Real appointment history (ground truth, same as "Past Treatments")
+//   2. Guest profile created_date (fallback if #1 fails)
+//   3. null (caller falls back to its own db-only guess)
+// One email/id lookup + one appointment-history lookup per call - same
+// quota cost as before, just a more reliable answer.
+async function determineCustomerType({ email, zenotiGuestId, atDate, excludeAppointmentGroupId }) {
+  let guest = await lookupGuestByEmail(email);
+  if (!guest && zenotiGuestId) {
+    guest = await lookupGuestById(zenotiGuestId);
+  }
+  const guestId = (guest && guest.id) || zenotiGuestId;
+  if (!guestId) return null;
+
+  const appointments = await lookupGuestAppointments(guestId);
+  const fromHistory = customerTypeFromAppointmentHistory(appointments, { beforeDate: atDate, excludeAppointmentGroupId });
+  if (fromHistory) return fromHistory;
+
+  return customerTypeFromGuest(guest, atDate);
+}
+
+module.exports = {
+  lookupGuestByEmail,
+  lookupGuestById,
+  lookupGuestAppointments,
+  customerTypeFromAppointmentHistory,
+  customerTypeFromGuest,
+  determineCustomerType,
+  NEW_GUEST_WINDOW_HOURS,
+};

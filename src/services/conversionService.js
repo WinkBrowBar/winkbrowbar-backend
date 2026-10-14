@@ -194,7 +194,7 @@ const MarketingPlatform = require('../db/models/MarketingPlatform');
 const Conversion = require('../db/models/Conversion');
 const { pickAttributedVisit, platformFromVisit } = require('./attribution');
 const { getConnector } = require('../connectors');
-const { lookupGuestByEmail, lookupGuestById, customerTypeFromGuest } = require('./zenotiGuestLookup');
+const { determineCustomerType } = require('./zenotiGuestLookup');
 
 // Decision 2026-09-28: this system tracks which ad platform a sale came
 // from for OUR OWN internal reporting/dashboard only. It must never send
@@ -305,18 +305,19 @@ async function processInvoiceConversion({ brandId, invoiceId }) {
     if (bookingAppointment && bookingAppointment.customerType) {
       zenotiCustomerType = bookingAppointment.customerType;
     } else {
-      // Send this customer's email to Zenoti directly (confirmed working
-      // 2026-10-13 - GET /v1/guests/search?email=..., a single lightweight
-      // call, not the heavy Sales Accrual Report) and compare the guest
-      // profile's created_date - Zenoti's own real history - to this
-      // invoice's close time. This is why we check Zenoti instead of just
-      // our own db: our own tracking only goes back so far, Zenoti's guest
-      // history goes back the customer's full real history.
-      let guest = await lookupGuestByEmail(customer.email);
-      if (!guest && customer.zenotiGuestId) {
-        guest = await lookupGuestById(customer.zenotiGuestId);
-      }
-      zenotiCustomerType = customerTypeFromGuest(guest, invoiceClosedAt);
+      // Walk-in with no prior booking event - check Zenoti directly here.
+      // determineCustomerType checks the guest's REAL appointment/invoice
+      // history first (same data as Zenoti's "Past Treatments" tab), falling
+      // back to guest profile created_date only if that fails - this is why
+      // we check Zenoti at all instead of just our own db: our own tracking
+      // only goes back so far, Zenoti's guest history goes back the
+      // customer's full real history.
+      zenotiCustomerType = await determineCustomerType({
+        email: customer.email,
+        zenotiGuestId: customer.zenotiGuestId,
+        atDate: invoiceClosedAt,
+        excludeAppointmentGroupId: bookingAppointment ? bookingAppointment.zenotiAppointmentGroupId : null,
+      });
     }
     // Falls back to the old db-only guess (first invoice we've ever seen
     // for this customer) only if neither the booking tag nor a fresh Zenoti

@@ -11,21 +11,32 @@
 // Safe to re-run on invoices Zenoti already confirmed "new" too - it'll
 // just confirm them again. Never touches anything already 'returning'.
 //
-// Much lower concurrency + a delay between every request than the first
-// backfill, specifically to avoid tripping the same quota wall again. If
-// several requests in a row still come back 429 even after this script's
-// own per-request retries, that's very likely the WHOLE account quota
-// exhausted (e.g. a daily cap, not a per-second throttle) - this stops
-// early rather than burning through the rest of the list for nothing, and
-// tells you how many are left so you can resume later (same command -
-// already-confirmed ones are skipped automatically next time... actually
-// no: a confirmed 'new' looks identical to an unconfirmed 'new' in the db,
-// so re-running after a quota reset will recheck everyone currently
-// tagged 'new' again. That's fine - it's a few thousand quick lookups,
-// just slower than ideal).
+// Updated 2026-10-14: now uses determineCustomerType, which checks the
+// guest's REAL appointment/invoice history first (GET
+// /v1/guests/{id}/appointments - same data as Zenoti's "Past Treatments"
+// tab), falling back to guest profile created_date only if that fails.
+// Found via a real mislabel (Cynthia Johnson / invoice WV25491, tagged
+// "new" despite a March 2024 purchase) that turned out to be a quota
+// failure that day, not a bad signal - but the appointment-history check is
+// strictly more reliable than a single created_date field, so it's now the
+// primary check everywhere.
+//
+// Updated 2026-10-14 again: confirmed against Zenoti's own docs
+// (docs.zenoti.com/docs/api-rate-limits-1) that "Account quota exceeded" is
+// NOT a daily cap - it's a sliding 60-calls-PER-MINUTE limit that
+// continuously refills. Earlier runs kept tripping it because
+// determineCustomerType can make up to 2 Zenoti calls per customer (guest
+// lookup + appointment history), and a 500ms delay between customers works
+// out to ~120 calls/min - double the real limit.
+//
+// Fixed two ways: the default delay is now paced to stay under 60/min even
+// in the 2-call-per-customer worst case, AND hitting 429 repeatedly no
+// longer aborts the whole run - it just waits out one refill window
+// (COOLDOWN_MS) and keeps going, since the limit resets within a minute,
+// not a day.
 //
 // Usage:
-//   node retryCustomerTypeViaZenoti.js --brand=<brandId or slug> [--delay=500] [--dry-run]
+//   node retryCustomerTypeViaZenoti.js --brand=<brandId or slug> [--delay=2200] [--dry-run]
 
 require('dotenv').config();
 const mongoose = require('mongoose');
@@ -33,7 +44,7 @@ const { connectDB } = require('./src/db/connection');
 const Brand = require('./src/db/models/Brand');
 const Invoice = require('./src/db/models/Invoice');
 const Customer = require('./src/db/models/Customer');
-const { lookupGuestByEmail, lookupGuestById, customerTypeFromGuest } = require('./src/services/zenotiGuestLookup');
+const { determineCustomerType } = require('./src/services/zenotiGuestLookup');
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
@@ -49,10 +60,13 @@ function sleep(ms) {
 (async () => {
   const brandArg = argValue('brand');
   if (!brandArg) {
-    console.error('Usage: node retryCustomerTypeViaZenoti.js --brand=<brandId or slug> [--delay=500] [--dry-run]');
+    console.error('Usage: node retryCustomerTypeViaZenoti.js --brand=<brandId or slug> [--delay=2200] [--dry-run]');
     process.exit(1);
   }
-  const delayMs = Number(argValue('delay')) || 500;
+  // 2200ms default: worst case 2 Zenoti calls/customer -> ~55 calls/min,
+  // safely under the real 60/min limit with some headroom.
+  const delayMs = Number(argValue('delay')) || 2200;
+  const COOLDOWN_MS = 65000; // one full refill window, plus a little buffer
 
   await connectDB();
 
@@ -75,15 +89,9 @@ function sleep(ms) {
   for (const [i, invoice] of invoices.entries()) {
     const customer = invoice.customerId ? await Customer.findById(invoice.customerId).lean() : null;
 
-    let guest = null;
-    if (customer && customer.email) {
-      guest = await lookupGuestByEmail(customer.email);
-    }
-    if (!guest && customer && customer.zenotiGuestId) {
-      guest = await lookupGuestById(customer.zenotiGuestId);
-    }
-
-    const zenotiType = customerTypeFromGuest(guest, invoice.closedAt);
+    const zenotiType = customer
+      ? await determineCustomerType({ email: customer.email, zenotiGuestId: customer.zenotiGuestId, atDate: invoice.closedAt })
+      : null;
 
     if (zenotiType) {
       consecutive429s = 0;
@@ -104,9 +112,11 @@ function sleep(ms) {
     if ((i + 1) % 100 === 0) console.log(`...${i + 1}/${invoices.length} (confirmed new: ${confirmedNew}, flipped: ${flippedToReturning}, inconclusive: ${stillInconclusive})`);
 
     if (consecutive429s >= 10) {
-      console.log(`\nStopping early - 10 lookups in a row came back inconclusive after retries. This almost certainly means the account's Zenoti API quota is exhausted again (likely a daily cap), not a one-off blip.`);
-      console.log(`Processed ${i + 1}/${invoices.length}. Wait for the quota to reset (check with Zenoti support/docs for your plan's reset window) and re-run this same command - it'll pick up wherever "new" tags remain.`);
-      break;
+      // Confirmed via Zenoti's docs: this is a 60/min sliding limit, not a
+      // daily cap - wait out one refill window instead of giving up.
+      console.log(`\n10 lookups in a row came back inconclusive - likely the 60/min rate limit. Cooling down ${COOLDOWN_MS / 1000}s before continuing (processed ${i + 1}/${invoices.length} so far)...`);
+      await sleep(COOLDOWN_MS);
+      consecutive429s = 0;
     }
 
     await sleep(delayMs);
