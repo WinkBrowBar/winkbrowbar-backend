@@ -991,7 +991,7 @@ function resolveUpcomingRange(query) {
 // pipeline visibility only.
 router.get('/upcoming', async (req, res) => {
   const brandId = req.user.brandId;
-  const { location, platform, search } = req.query;
+  const { location, platform, search, hideZero } = req.query;
   const { since, until } = resolveUpcomingRange(req.query);
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Number(req.query.limit) || 25);
@@ -1091,6 +1091,13 @@ router.get('/upcoming', async (req, res) => {
     // run here in JS, after the attribution fallback resolves each row's
     // platform/customer fields, not inside the Mongo pipeline.
     let filtered = platform && platform !== 'all' ? rows.filter((r) => r.platform === platform) : rows;
+    // hideZero=true drops bookings whose estimated value came out to $0 -
+    // same meaning as the Transactions page's toggle, just applied to
+    // estimatedValue (computed above from service price history) since
+    // upcoming rows are per-BOOKING, not per-line-item like Transactions.
+    if (hideZero === 'true') {
+      filtered = filtered.filter((r) => (r.estimatedValue || 0) !== 0);
+    }
     if (search && search.trim()) {
       const needle = search.trim().toLowerCase();
       filtered = filtered.filter((r) => (
