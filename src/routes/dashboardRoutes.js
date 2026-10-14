@@ -985,7 +985,7 @@ function resolveUpcomingRange(query) {
 // pipeline visibility only.
 router.get('/upcoming', async (req, res) => {
   const brandId = req.user.brandId;
-  const { location, platform } = req.query;
+  const { location, platform, search } = req.query;
   const { since, until } = resolveUpcomingRange(req.query);
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Number(req.query.limit) || 25);
@@ -1081,7 +1081,21 @@ router.get('/upcoming', async (req, res) => {
 
     const availablePlatforms = [...new Set(rows.map((r) => r.platform))].sort();
 
-    const filtered = platform && platform !== 'all' ? rows.filter((r) => r.platform === platform) : rows;
+    // Same per-row approach as the platform filter above - search has to
+    // run here in JS, after the attribution fallback resolves each row's
+    // platform/customer fields, not inside the Mongo pipeline.
+    let filtered = platform && platform !== 'all' ? rows.filter((r) => r.platform === platform) : rows;
+    if (search && search.trim()) {
+      const needle = search.trim().toLowerCase();
+      filtered = filtered.filter((r) => (
+        (r.invoiceNumber || '').toLowerCase().includes(needle)
+        || (r.customerName || '').toLowerCase().includes(needle)
+        || (r.email || '').toLowerCase().includes(needle)
+        || (r.services || []).some((s) => s.toLowerCase().includes(needle))
+        || (r.location || '').toLowerCase().includes(needle)
+        || (r.utmCampaign || '').toLowerCase().includes(needle)
+      ));
+    }
     const total = filtered.length;
     const totalEstimatedValue = filtered
       .filter((r) => r.status !== 'cancelled')

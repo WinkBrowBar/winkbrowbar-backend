@@ -286,22 +286,34 @@ async function handleEvent(brandId, event) {
       });
     }
 
-    await Appointment.create({
-      brandId,
-      customerId: customer ? customer._id : null,
-      zenotiGuestId: guest.id,
-      zenotiAppointmentGroupId: data.appointment_group_id,
-      status: 'created',
-      bookedAt,
-      appointmentDate,
-      serviceNames,
-      centerName: data.center_Name || data.center_name || centerName(data.center_id) || null,
-      zenotiInvoiceId: data.invoice_id || null,
-      invoiceNumber: data.invoice_number ? `${data.invoice_number_prefix || ''}${data.invoice_number}` : null,
-      visitId: visit ? visit._id : null,
-      rebookedFromGroupId: data.rebooked_source_group_id || null,
-      customerType,
-    });
+    // Upsert on (brandId, zenotiAppointmentGroupId) rather than a plain
+    // create - Zenoti can redeliver the same appointment.created event (a
+    // timeout on our ack is a normal reason), and a bare create() on every
+    // delivery produces a second, identical Appointment doc for the same
+    // real booking (seen live: invoice CH19945 showing twice in Upcoming).
+    // $setOnInsert keeps this a no-op write on a genuine redelivery instead
+    // of refreshing fields that may have changed since (e.g. customerType,
+    // which shouldn't flip just because the same event arrived twice).
+    await Appointment.findOneAndUpdate(
+      { brandId, zenotiAppointmentGroupId: data.appointment_group_id },
+      {
+        $setOnInsert: {
+          customerId: customer ? customer._id : null,
+          zenotiGuestId: guest.id,
+          status: 'created',
+          bookedAt,
+          appointmentDate,
+          serviceNames,
+          centerName: data.center_Name || data.center_name || centerName(data.center_id) || null,
+          zenotiInvoiceId: data.invoice_id || null,
+          invoiceNumber: data.invoice_number ? `${data.invoice_number_prefix || ''}${data.invoice_number}` : null,
+          visitId: visit ? visit._id : null,
+          rebookedFromGroupId: data.rebooked_source_group_id || null,
+          customerType,
+        },
+      },
+      { upsert: true, new: true },
+    );
 
     // Per Zenoti support: a reschedule creates a brand-new appointment group
     // (this one) and stores the original group id in
