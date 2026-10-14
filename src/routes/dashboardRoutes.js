@@ -678,9 +678,13 @@ router.get('/trend', async (req, res) => {
 router.get('/transactions', async (req, res) => {
   const brandId = req.user.brandId;
   const { since, until } = resolveRange(req.query);
-  const { search, platform, location, status, customerType } = req.query;
+  const { search, platform, location, status, customerType, hideZero } = req.query;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Number(req.query.limit) || 25);
+  // hideZero=true drops $0 LINE ITEMS (comped add-ons, $0 service rows on
+  // an otherwise-paid invoice) - matched post-$unwind on items.price, same
+  // place search/platform already filter, not on the invoice's total.
+  const zeroItemMatch = hideZero === 'true' ? [{ $match: { 'items.price': { $ne: 0 } } }] : [];
 
   try {
     const statusFilter = status === 'open' || status === 'closed' ? status : { $in: ['closed', 'open'] };
@@ -754,6 +758,7 @@ router.get('/transactions', async (req, res) => {
         $facet: {
           data: [
             ...(platform && platform !== 'all' ? [{ $match: { platformList: platform } }] : []),
+            ...zeroItemMatch,
             ...(search && search.trim()
               ? [{
                   $match: {
@@ -790,6 +795,7 @@ router.get('/transactions', async (req, res) => {
           ],
           totalCount: [
             ...(platform && platform !== 'all' ? [{ $match: { platformList: platform } }] : []),
+            ...zeroItemMatch,
             ...(search && search.trim()
               ? [{
                   $match: {
