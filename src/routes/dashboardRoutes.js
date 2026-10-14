@@ -991,7 +991,7 @@ function resolveUpcomingRange(query) {
 // pipeline visibility only.
 router.get('/upcoming', async (req, res) => {
   const brandId = req.user.brandId;
-  const { location, platform, search, hideZero } = req.query;
+  const { location, platform, search, hideZero, customerType } = req.query;
   const { since, until } = resolveUpcomingRange(req.query);
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Number(req.query.limit) || 25);
@@ -1097,6 +1097,9 @@ router.get('/upcoming', async (req, res) => {
     // upcoming rows are per-BOOKING, not per-line-item like Transactions.
     if (hideZero === 'true') {
       filtered = filtered.filter((r) => (r.estimatedValue || 0) !== 0);
+    }
+    if (customerType === 'new' || customerType === 'returning') {
+      filtered = filtered.filter((r) => r.customerType === customerType);
     }
     if (search && search.trim()) {
       const needle = search.trim().toLowerCase();
