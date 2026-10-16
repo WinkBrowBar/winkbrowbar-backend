@@ -322,7 +322,7 @@ router.get('/customers', async (req, res) => {
   const brandId = req.user.brandId;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Number(req.query.limit) || 20);
-  const { search, sortBy } = req.query;
+  const { search, sortBy, location } = req.query;
 
   const filter = { brandId, lifetimeRevenue: { $gt: 0 } };
 
@@ -340,6 +340,20 @@ router.get('/customers', async (req, res) => {
   if (search && search.trim()) {
     const re = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     filter.$or = [{ name: re }, { email: re }, { phone: re }];
+  }
+
+  // Customer itself carries no location - a customer can have bought at
+  // more than one center over their lifetime - so "scope to a location"
+  // means "has at least one closed invoice at that center", found via a
+  // separate Invoice lookup rather than a field on Customer directly.
+  if (location && location !== 'all') {
+    const matchingCustomerIds = await Invoice.distinct('customerId', {
+      brandId: new mongoose.Types.ObjectId(brandId),
+      status: 'closed',
+      customerId: { $ne: null },
+      ...centerMatchClause(location),
+    });
+    filter._id = { $in: matchingCustomerIds };
   }
 
   const sort = sortBy === 'revenue' ? { lifetimeRevenue: -1 } : { lastPurchaseDate: -1 };
@@ -530,9 +544,11 @@ router.get('/location-report', async (req, res) => {
 
     const totalsResult = await Invoice.aggregate([
       { $match: invoiceMatch },
-      { $group: { _id: null, totalRevenue: { $sum: '$amount' }, totalInvoices: { $sum: 1 } } },
+      { $group: { _id: null, totalRevenue: { $sum: '$amount' }, totalTax: { $sum: '$tax' }, totalInvoices: { $sum: 1 } } },
     ]);
     const totalRevenue = totalsResult[0] ? totalsResult[0].totalRevenue : 0;
+    const totalTax = totalsResult[0] ? totalsResult[0].totalTax : 0;
+    const totalRevenueExTax = totalRevenue - totalTax;
     const totalInvoices = totalsResult[0] ? totalsResult[0].totalInvoices : 0;
 
     const byPlatform = await Conversion.aggregate([
@@ -581,6 +597,8 @@ router.get('/location-report', async (req, res) => {
       rangeStart: since,
       rangeEnd: until,
       totalRevenue,
+      totalRevenueExTax,
+      totalTax,
       totalInvoices,
       avgOrderValue: totalInvoices ? Number((totalRevenue / totalInvoices).toFixed(2)) : 0,
       byPlatform,
