@@ -11,6 +11,7 @@ const { requireRole } = require('../middleware/requireAuth');
 const { centerName, CENTER_NAMES } = require('../utils/centerNames');
 const { pickAttributedVisit, platformFromVisit } = require('../services/attribution');
 const { syncCallLeadsFromSheet, toCsvExportUrl } = require('../services/syncCallLeadsFromSheet');
+const CallLead = require('../db/models/CallLead');
 const router = express.Router();
 
 router.use(requireRole('admin', 'viewer'));
@@ -1194,6 +1195,49 @@ router.patch('/call-lead-sheet', requireRole('admin'), async (req, res) => {
   } catch (err) {
     console.error('call-lead-sheet save error', err);
     res.status(500).json({ error: 'Failed to save sheet link' });
+  }
+});
+
+// GET /api/dashboard/call-leads?page=&limit=&search= - the actual imported
+// rows, newest call first, so you can SEE what came in rather than just a
+// count. search matches phone (digits only) or caller name.
+router.get('/call-leads', async (req, res) => {
+  const brandId = req.user.brandId;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(100, Number(req.query.limit) || 25);
+  const { search } = req.query;
+
+  const filter = { brandId };
+  if (search && search.trim()) {
+    const digits = search.replace(/\D/g, '');
+    const re = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    filter.$or = [
+      { callerName: re },
+      { rawPhone: re },
+      ...(digits ? [{ phone: { $regex: digits.slice(-10) } }] : []),
+    ];
+  }
+
+  try {
+    const [callLeads, total] = await Promise.all([
+      CallLead.find(filter)
+        .sort({ callDate: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select('rawPhone phone callerName callDate createdAt'),
+      CallLead.countDocuments(filter),
+    ]);
+
+    res.json({
+      callLeads,
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    });
+  } catch (err) {
+    console.error('call-leads list error', err);
+    res.status(500).json({ error: 'Failed to list call leads' });
   }
 });
 
