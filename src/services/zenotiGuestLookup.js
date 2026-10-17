@@ -120,6 +120,42 @@ async function lookupGuestAppointments(guestId) {
   }
 }
 
+// Same endpoint as lookupGuestAppointments, but pages through the FULL
+// result set instead of trusting page 1 alone. lookupGuestAppointments
+// (and determineCustomerType, which relies on it) silently only ever saw
+// the first page=1&size=10 - fine for the "does any earlier visit exist"
+// check (one true hit anywhere is enough), but wrong for anything that
+// needs to know a specific appointment is ABSENT: a guest with more than
+// 10 appointments could have their real upcoming booking sitting on page
+// 2+, which would make it look cancelled/missing when it isn't (seen live
+// 2026-10-17, syncUpcomingAppointmentsFromZenoti.js: ~231 of 250 upcoming
+// appointments came back "not found" on a single-page lookup, most of
+// which turned out to be real cancellations Zenoti never webhooked - but
+// that conclusion is only trustworthy once every page has actually been
+// checked, not assumed from page 1). Param names (page, size) confirmed
+// against docs.zenoti.com/docs/pagination, not guessed.
+async function lookupGuestAppointmentsAllPages(guestId, { pageSize = 100, maxPages = 20 } = {}) {
+  if (!guestId || !ZENOTI_API_KEY) return null;
+  const all = [];
+  try {
+    for (let page = 1; page <= maxPages; page++) {
+      const { data } = await getWithRetry(`${ZENOTI_API_BASE}/v1/guests/${guestId}/appointments`, {
+        params: { page, size: pageSize },
+        headers: { Authorization: `apikey ${ZENOTI_API_KEY}` },
+        timeout: 10000,
+      });
+      const batch = data && Array.isArray(data.appointments) ? data.appointments : [];
+      all.push(...batch);
+      const total = data && data.page_info && typeof data.page_info.total === 'number' ? data.page_info.total : all.length;
+      if (all.length >= total || batch.length === 0) break;
+    }
+    return all;
+  } catch (err) {
+    console.error(`zenotiGuestLookup (appointments, all pages) failed for ${guestId}:`, err.response ? JSON.stringify(err.response.data) : err.message);
+    return null;
+  }
+}
+
 function earliestServiceStart(appointment) {
   const services = Array.isArray(appointment.appointment_services) ? appointment.appointment_services : [];
   const times = services.map((s) => s.start_time).filter(Boolean).map((t) => new Date(t)).filter((d) => !Number.isNaN(d.getTime()));
@@ -215,6 +251,7 @@ module.exports = {
   lookupGuestByEmail,
   lookupGuestById,
   lookupGuestAppointments,
+  lookupGuestAppointmentsAllPages,
   customerTypeFromAppointmentHistory,
   customerTypeFromGuest,
   determineCustomerType,

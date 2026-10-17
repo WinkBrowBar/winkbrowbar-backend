@@ -16,6 +16,7 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const { requireAuth } = require('./middleware/requireAuth');
 const shopifyOAuth = require('./routes/shopifyOAuth');
 const zenotiWebhook = require('./webhooks/zenotiWebhook');
+const { startScheduler } = require('./scheduler');
 
 const app = express();
 
@@ -74,4 +75,5 @@ connectDB().then(() => {
   app.listen(PORT, () => {
     console.log(`Attribution system running on port ${PORT}`);
   });
+  startScheduler();
 });
