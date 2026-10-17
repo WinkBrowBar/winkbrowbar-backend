@@ -195,6 +195,7 @@ const Conversion = require('../db/models/Conversion');
 const { pickAttributedVisit, platformFromVisit } = require('./attribution');
 const { getConnector } = require('../connectors');
 const { determineCustomerType } = require('./zenotiGuestLookup');
+const { findMatchingCallLead } = require('./callLeadMatching');
 
 // Decision 2026-09-28: this system tracks which ad platform a sale came
 // from for OUR OWN internal reporting/dashboard only. It must never send
@@ -377,7 +378,23 @@ async function processConversionsForInvoice({ brandId, invoice, customer }) {
       requireClickId: false,
     });
 
-    const sourceLabel = (organicVisit && organicVisit.utmSource) ? organicVisit.utmSource.toLowerCase() : 'direct';
+    let sourceLabel = (organicVisit && organicVisit.utmSource) ? organicVisit.utmSource.toLowerCase() : 'direct';
+
+    // No tracked web visit at all - before settling for 'direct', check
+    // whether this customer actually called in off a Google Ads call
+    // extension (decision 2026-10-17: phone leads never touch the website,
+    // so they'd otherwise always get mislabeled 'direct'). Forward-only -
+    // only consulted here, during normal invoice processing, never
+    // backfilled onto conversions already recorded before this existed.
+    let matchedCallLead = null;
+    if (sourceLabel === 'direct' && customer.phone) {
+      matchedCallLead = await findMatchingCallLead({
+        brandId,
+        phone: customer.phone,
+        aroundDate: invoice.closedAt,
+      });
+      if (matchedCallLead) sourceLabel = 'google';
+    }
 
     try {
 const conversionRecord = await Conversion.create({
@@ -385,7 +402,7 @@ const conversionRecord = await Conversion.create({
         invoiceId: invoice._id,
         customerId: customer._id,
         attributionVisitId: organicVisit ? organicVisit._id : null,
-        attributionModelUsed: organicVisit ? modelUsed : null,
+        attributionModelUsed: organicVisit ? modelUsed : (matchedCallLead ? 'call_lead_phone_match' : null),
         platform: sourceLabel,
         amount: invoice.amount,
         eventTime: invoice.closedAt,

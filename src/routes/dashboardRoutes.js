@@ -10,6 +10,7 @@ const AdSpend = require('../db/models/AdSpend');
 const { requireRole } = require('../middleware/requireAuth');
 const { centerName, CENTER_NAMES } = require('../utils/centerNames');
 const { pickAttributedVisit, platformFromVisit } = require('../services/attribution');
+const { syncCallLeadsFromSheet, toCsvExportUrl } = require('../services/syncCallLeadsFromSheet');
 const router = express.Router();
 
 router.use(requireRole('admin', 'viewer'));
@@ -1148,6 +1149,74 @@ router.get('/upcoming', async (req, res) => {
   } catch (err) {
     console.error('dashboard upcoming error', err);
     res.status(500).json({ error: 'Failed to build upcoming bookings list' });
+  }
+});
+
+// Call-lead sheet panel - lets a logged-in user paste their public Google
+// Ads call-log sheet link once, see when it last synced, and trigger a
+// sync on demand, instead of running importGoogleCallLeads.js by hand.
+// See src/services/syncCallLeadsFromSheet.js and src/db/models/CallLead.js.
+
+// GET /api/dashboard/call-lead-sheet - current saved link + last sync info
+router.get('/call-lead-sheet', async (req, res) => {
+  try {
+    const brand = await Brand.findById(req.user.brandId).select('callLeadSheetUrl lastCallLeadSyncAt lastCallLeadSyncResult');
+    if (!brand) return res.status(404).json({ error: 'Brand not found' });
+    res.json({
+      callLeadSheetUrl: brand.callLeadSheetUrl || null,
+      lastCallLeadSyncAt: brand.lastCallLeadSyncAt || null,
+      lastCallLeadSyncResult: brand.lastCallLeadSyncResult || null,
+    });
+  } catch (err) {
+    console.error('call-lead-sheet get error', err);
+    res.status(500).json({ error: 'Failed to load call-lead sheet settings' });
+  }
+});
+
+// PATCH /api/dashboard/call-lead-sheet { url } - save/replace the sheet link.
+// Restricted to admins, same as other brand-settings changes.
+router.patch('/call-lead-sheet', requireRole('admin'), async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'url is required' });
+
+  if (!toCsvExportUrl(url)) {
+    return res.status(400).json({ error: 'That doesn\'t look like a Google Sheets link. Paste the normal "Share" link to the sheet.' });
+  }
+
+  try {
+    const brand = await Brand.findByIdAndUpdate(
+      req.user.brandId,
+      { callLeadSheetUrl: url },
+      { new: true }
+    ).select('callLeadSheetUrl');
+    if (!brand) return res.status(404).json({ error: 'Brand not found' });
+    res.json({ success: true, callLeadSheetUrl: brand.callLeadSheetUrl });
+  } catch (err) {
+    console.error('call-lead-sheet save error', err);
+    res.status(500).json({ error: 'Failed to save sheet link' });
+  }
+});
+
+// POST /api/dashboard/call-lead-sheet/sync - pull the sheet right now
+// (same logic the scheduled sync runs), for a "Sync now" button.
+router.post('/call-lead-sheet/sync', async (req, res) => {
+  try {
+    const brand = await Brand.findById(req.user.brandId);
+    if (!brand) return res.status(404).json({ error: 'Brand not found' });
+    if (!brand.callLeadSheetUrl) {
+      return res.status(400).json({ error: 'No sheet link saved yet for this brand' });
+    }
+
+    const result = await syncCallLeadsFromSheet(brand);
+    brand.lastCallLeadSyncAt = new Date();
+    brand.lastCallLeadSyncResult = result;
+    await brand.save();
+
+    if (result.error) return res.status(502).json(result);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('call-lead-sheet sync error', err);
+    res.status(500).json({ error: 'Sync failed' });
   }
 });
 

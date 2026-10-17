@@ -24,6 +24,14 @@ const brandSchema = new Schema({
   // it. 30 mirrors Meta's own default click-through attribution window.
   attributionWindowDays: { type: Number, default: 30 },
   isActive: { type: Boolean, default: true },
+
+  // Public Google Sheet link (File > Share > Anyone with the link can view)
+  // where this brand logs Google Ads call leads. Pulled periodically by
+  // scheduler.js and on demand via POST /api/dashboard/call-lead-sheet/sync
+  // - see syncCallLeadsFromSheet.js.
+  callLeadSheetUrl: { type: String, default: null },
+  lastCallLeadSyncAt: { type: Date, default: null },
+  lastCallLeadSyncResult: Schema.Types.Mixed,
 }, { timestamps: true });
 
 module.exports = model('Brand', brandSchema);
