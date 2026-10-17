@@ -20,16 +20,38 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Retries a 429 ("Account quota exceeded") a few times with backoff.
 // Confirmed against Zenoti's own docs (docs.zenoti.com/docs/api-rate-limits-1):
-// this is a sliding 60-calls-PER-MINUTE limit that continuously refills,
-// NOT a daily cap - so a short in-process backoff here can genuinely
-// succeed if this call just caught the tail end of a busy window. If it's
-// still 429 after all retries, the caller gets null and falls back to its
-// own next option (a longer cooldown at the script level, or a db-only
-// guess) - never treat this as "nothing will work until tomorrow".
+// this account's cap is a sliding 60-calls-PER-MINUTE window that
+// continuously refills, not a daily cap. The retry-with-backoff below reacts
+// AFTER a 429 already happened; it doesn't stop one from happening in the
+// first place. A backfill script firing several lookups concurrently blows
+// through the 60/min budget in the first second or two (confirmed live:
+// backfillCustomerEmailViaZenoti.js at concurrency=5 started drawing 429s
+// within the first ~100 customers), so every call in this file is paced
+// through one shared sliding-window gate first - self-throttling to stay
+// under quota instead of bursting and hoping the retry catches it. 50/min
+// (not 60) leaves headroom for whatever else is also hitting this account's
+// key at the same time (live webhook traffic, other scripts).
+const MAX_CALLS_PER_MINUTE = 50;
+const callTimestamps = [];
+async function throttle() {
+  const now = Date.now();
+  while (callTimestamps.length && now - callTimestamps[0] > 60000) callTimestamps.shift();
+  if (callTimestamps.length >= MAX_CALLS_PER_MINUTE) {
+    const waitMs = 60000 - (now - callTimestamps[0]) + 50;
+    await sleep(waitMs);
+    return throttle();
+  }
+  callTimestamps.push(Date.now());
+}
+
+// Retries a 429 ("Account quota exceeded") a few times with backoff, on top
+// of the self-throttle above - a safety net for the rare case another
+// process sharing this API key (live webhooks, a different script) used up
+// quota this instance didn't know about.
 async function getWithRetry(url, config, { retries = 3, baseDelayMs = 2000 } = {}) {
   for (let attempt = 0; attempt <= retries; attempt++) {
+    await throttle();
     try {
       return await axios.get(url, config);
     } catch (err) {
@@ -164,6 +186,31 @@ async function determineCustomerType({ email, zenotiGuestId, atDate, excludeAppo
   return customerTypeFromGuest(guest, atDate);
 }
 
+// Zenoti's own REST responses (GET /v1/guests/{id} and /v1/guests/search)
+// haven't been confirmed field-by-field against a real payload yet - unlike
+// the webhook event shape (data.personal_info.email), which IS confirmed
+// (see zenotiWebhook.js). Check every shape that's been seen in Zenoti's
+// docs/other integrations rather than assuming one, so a guest's email gets
+// picked up regardless of which shape this account's API actually returns.
+function extractGuestEmail(guest) {
+  if (!guest) return null;
+  return (
+    guest.email
+    || guest.email_id
+    || (guest.personal_info && (guest.personal_info.email || guest.personal_info.email_id))
+    || null
+  );
+}
+
+function extractGuestPhone(guest) {
+  if (!guest) return null;
+  const mobile = guest.mobile_phone || (guest.personal_info && guest.personal_info.mobile_phone);
+  if (mobile && mobile.number) {
+    return mobile.phone_code ? `+${mobile.phone_code} ${mobile.number}` : mobile.number;
+  }
+  return guest.phone || null;
+}
+
 module.exports = {
   lookupGuestByEmail,
   lookupGuestById,
@@ -171,5 +218,7 @@ module.exports = {
   customerTypeFromAppointmentHistory,
   customerTypeFromGuest,
   determineCustomerType,
+  extractGuestEmail,
+  extractGuestPhone,
   NEW_GUEST_WINDOW_HOURS,
 };
