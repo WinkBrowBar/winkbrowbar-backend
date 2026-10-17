@@ -38,4 +38,19 @@ customerSchema.index(
   { unique: true, partialFilterExpression: { zenotiGuestId: { $type: 'string' } } },
 );
 
-module.exports = model('Customer', customerSchema);
+const Customer = model('Customer', customerSchema);
+
+// Mongoose builds indexes in the background on connect and only reports
+// failure through this event - nothing throws, nothing rejects a promise
+// anywhere else. That's exactly how the brandId+zenotiGuestId unique index
+// above silently downgraded to a plain non-unique index (duplicates
+// already existed in the collection when it was added) without anyone
+// noticing, until a guest's Customer doc split in two (seen live: Tia
+// Bell, then Niki Mira). Log it loudly so that can't happen again unseen -
+// see checkGuestIdIndex.js / rebuildGuestIdIndex.js for how this was found
+// and fixed on 2026-10-17.
+Customer.on('index', (err) => {
+  if (err) console.error('Customer index build failed:', err.message);
+});
+
+module.exports = Customer;
