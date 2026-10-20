@@ -43,10 +43,15 @@ function resolveRange(query) {
   const { days, startDate, endDate } = query;
 
   if (startDate || endDate) {
+    // startDate/endDate arrive as bare "YYYY-MM-DD" strings, which `new
+    // Date(...)` parses as UTC midnight - so the boundary has to be set in
+    // UTC too. Using local setHours() here shifts the window by the
+    // server's TZ offset (e.g. cuts off most of the last day on US
+    // servers), which is why this only broke "sometimes".
     const since = startDate ? new Date(startDate) : new Date(0);
-    since.setHours(0, 0, 0, 0);
+    since.setUTCHours(0, 0, 0, 0);
     const until = endDate ? new Date(endDate) : new Date();
-    until.setHours(23, 59, 59, 999);
+    until.setUTCHours(23, 59, 59, 999);
     return { since, until, windowDays: Math.max(1, Math.round((until - since) / 86400000)), custom: true };
   }
 
@@ -989,10 +994,12 @@ function resolveUpcomingRange(query) {
   const { startDate, endDate, days } = query;
 
   if (startDate || endDate) {
+    // Same UTC-vs-local mismatch as resolveRange() above - the date string
+    // parses as UTC midnight, so the boundary must be set in UTC too.
     const since = startDate ? new Date(startDate) : new Date();
-    since.setHours(0, 0, 0, 0);
+    since.setUTCHours(0, 0, 0, 0);
     const requestedUntil = endDate ? new Date(endDate) : new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
-    requestedUntil.setHours(23, 59, 59, 999);
+    requestedUntil.setUTCHours(23, 59, 59, 999);
     const maxUntil = new Date(since.getTime() + MAX_UPCOMING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
     const until = requestedUntil > maxUntil ? maxUntil : requestedUntil;
     return { since, until, custom: true };
