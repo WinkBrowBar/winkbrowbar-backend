@@ -834,7 +834,8 @@ router.get('/transactions', async (req, res) => {
                   },
                 }]
               : []),
-            { $count: 'count' },
+            { $group: { _id: null, count: { $sum: 1 }, totalValue: { $sum: '$items.price' }, invoiceIds: { $addToSet: '$_id' } } },
+            { $project: { _id: 0, count: 1, totalValue: 1, invoiceCount: { $size: '$invoiceIds' } } },
           ],
           // All platforms present for this date range/location, regardless of
           // the platform filter itself - powers the dropdown so it always
@@ -851,6 +852,8 @@ router.get('/transactions', async (req, res) => {
 
   const [result] = await Invoice.aggregate(pipeline);
     const total = result.totalCount[0] ? result.totalCount[0].count : 0;
+    const totalValue = result.totalCount[0] ? result.totalCount[0].totalValue || 0 : 0;
+    const invoiceCount = result.totalCount[0] ? result.totalCount[0].invoiceCount : 0;
     const availablePlatforms = result.availablePlatforms.map((p) => p._id).filter(Boolean);
 
     // Open invoices don't have a Conversion doc yet (that's only created when
@@ -880,6 +883,8 @@ router.get('/transactions', async (req, res) => {
       page,
       limit,
       total,
+      totalValue,
+      invoiceCount,
       totalPages: Math.max(1, Math.ceil(total / limit)),
       availablePlatforms,
     });
