@@ -102,7 +102,7 @@ const totalRevenueResult = await Invoice.aggregate([
     const totalRevenueExTax = totalRevenue - totalTax;
     const totalInvoices = totalRevenueResult[0] ? totalRevenueResult[0].count : 0;
 
-   const AD_PLATFORMS = ['meta', 'google', 'awin'];
+   const AD_PLATFORMS = ['meta', 'google', 'google_call', 'awin'];
     const adAttributedRevenue = byPlatform
       .filter((p) => AD_PLATFORMS.includes(p._id))
       .reduce((sum, p) => sum + p.revenue, 0);
@@ -441,6 +441,8 @@ router.get('/cac', async (req, res) => {
     ]);
 
     const newCustomersMap = Object.fromEntries(newCustomersByPlatform.map((r) => [r._id, r.newCustomers]));
+    // Call leads are paid by the same Google Ads spend - count them in Google's CAC.
+    if (newCustomersMap.google_call) newCustomersMap.google = (newCustomersMap.google || 0) + newCustomersMap.google_call;
 
     const cac = spendByPlatform.map((s) => {
       const newCustomers = newCustomersMap[s._id] || 0;
@@ -750,7 +752,7 @@ router.get('/transactions', async (req, res) => {
             // label on the Transactions page even though the real ad
             // platform WAS correctly recorded. Always prefer a real ad
             // platform's record over an organic/direct one.
-            { $addFields: { _platformPriority: { $cond: [{ $in: ['$platform', ['meta', 'google', 'awin']] }, 0, 1] } } },
+            { $addFields: { _platformPriority: { $cond: [{ $in: ['$platform', ['meta', 'google', 'google_call', 'awin']] }, 0, 1] } } },
             { $sort: { _platformPriority: 1, createdAt: -1 } },
             { $limit: 1 },
           ],

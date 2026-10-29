@@ -393,7 +393,7 @@ async function processConversionsForInvoice({ brandId, invoice, customer }) {
         phone: customer.phone,
         aroundDate: invoice.closedAt,
       });
-      if (matchedCallLead) sourceLabel = 'google';
+      if (matchedCallLead) sourceLabel = 'google_call';
     }
 
     try {

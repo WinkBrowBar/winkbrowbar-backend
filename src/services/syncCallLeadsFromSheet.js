@@ -12,7 +12,7 @@
 const axios = require('axios');
 const CallLead = require('../db/models/CallLead');
 const { parseCsv, findColumn } = require('../utils/csv');
-const { normalizePhone, utcMidnight } = require('./callLeadMatching');
+const { normalizePhone, utcMidnight, rematchDirectSalesToCallLeads } = require('./callLeadMatching');
 
 // Accepts whatever link a person actually copies out of Google Sheets -
 // normally https://docs.google.com/spreadsheets/d/<ID>/edit#gid=<GID> - and
@@ -96,7 +96,9 @@ async function syncCallLeadsFromSheet(brand) {
     }
   }
 
-  return { imported, duplicates, skippedBadPhone, skippedBadDate };
+  const { matched, invoices: matchedInvoices } = await rematchDirectSalesToCallLeads(brand);
+
+  return { imported, duplicates, skippedBadPhone, skippedBadDate, matched, matchedInvoices };
 }
 
 module.exports = { syncCallLeadsFromSheet, toCsvExportUrl };
