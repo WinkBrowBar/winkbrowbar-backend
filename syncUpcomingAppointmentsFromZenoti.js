@@ -36,7 +36,7 @@ const mongoose = require('mongoose');
 const { connectDB } = require('./src/db/connection');
 const Brand = require('./src/db/models/Brand');
 const Appointment = require('./src/db/models/Appointment');
-const { lookupGuestAppointmentsAllPages } = require('./src/services/zenotiGuestLookup');
+const { lookupGuestAppointmentsAllPages, bookedPriceFromLiveAppointment } = require('./src/services/zenotiGuestLookup');
 const { centerLocalTimeToUtc } = require('./src/utils/centerTimezone');
 const { centerName } = require('./src/utils/centerNames');
 
@@ -107,17 +107,22 @@ async function syncBrand(brand, { dryRun = false, log = console.log } = {}) {
       const dateChanged = liveAppointmentDate && appt.appointmentDate && liveAppointmentDate.getTime() !== appt.appointmentDate.getTime();
       const namesChanged = liveServiceNames.length && JSON.stringify(liveServiceNames) !== JSON.stringify(appt.serviceNames);
 
-      if (!dateChanged && !namesChanged) continue;
+      const livePrice = bookedPriceFromLiveAppointment(live);
+      const priceChanged = livePrice != null && livePrice !== appt.bookedPrice;
+
+      if (!dateChanged && !namesChanged && !priceChanged) continue;
 
       corrected++;
       log(`  ${appt.invoiceNumber || appt._id} (${appt.centerName || '—'}):`);
       if (dateChanged) log(`    appointmentDate: ${appt.appointmentDate.toISOString()} -> ${liveAppointmentDate.toISOString()}`);
       if (namesChanged) log(`    serviceNames: ${JSON.stringify(appt.serviceNames)} -> ${JSON.stringify(liveServiceNames)}`);
+      if (priceChanged) log(`    bookedPrice: ${appt.bookedPrice} -> ${livePrice}`);
 
       if (!dryRun) {
         const update = {};
         if (dateChanged) update.appointmentDate = liveAppointmentDate;
         if (namesChanged) update.serviceNames = liveServiceNames;
+        if (priceChanged) update.bookedPrice = livePrice;
         if (liveCenterName) update.centerName = liveCenterName;
         await Appointment.updateOne({ _id: appt._id }, { $set: update });
       }

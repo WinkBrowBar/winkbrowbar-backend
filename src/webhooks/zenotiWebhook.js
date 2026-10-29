@@ -9,7 +9,7 @@ const { centerName } = require('../utils/centerNames');
 const { resolveIdentity } = require('../services/identityResolution');
 const { processInvoiceConversion } = require('../services/conversionService');
 const { centerLocalTimeToUtc } = require('../utils/centerTimezone');
-const { determineCustomerType } = require('../services/zenotiGuestLookup');
+const { determineCustomerType, lookupGuestAppointmentsAllPages, bookedPriceFromLiveAppointment } = require('../services/zenotiGuestLookup');
 const router = express.Router();
 
 function verifySignature(req) {
@@ -314,6 +314,27 @@ async function handleEvent(brandId, event) {
       },
       { upsert: true, new: true },
     );
+
+    // The booking webhook carries no price - fetch the real booked price
+    // (same number Zenoti's Treatment tab shows) from the live appointment
+    // right away, so Upcoming shows it immediately instead of an estimate.
+    // Never fails the event: on any miss, syncUpcomingAppointmentsFromZenoti
+    // fills it in on its next 3-hourly run.
+    if (guest.id) {
+      try {
+        const live = ((await lookupGuestAppointmentsAllPages(guest.id)) || [])
+          .find((a) => a.appointment_group_id === data.appointment_group_id);
+        const bookedPrice = live ? bookedPriceFromLiveAppointment(live) : null;
+        if (bookedPrice != null) {
+          await Appointment.updateOne(
+            { brandId, zenotiAppointmentGroupId: data.appointment_group_id },
+            { $set: { bookedPrice } },
+          );
+        }
+      } catch (err) {
+        console.error(`bookedPrice lookup failed for ${data.appointment_group_id}:`, err.message);
+      }
+    }
 
     // Per Zenoti support: a reschedule creates a brand-new appointment group
     // (this one) and stores the original group id in

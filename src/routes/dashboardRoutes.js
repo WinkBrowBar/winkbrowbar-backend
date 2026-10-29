@@ -1075,6 +1075,7 @@ router.get('/upcoming', async (req, res) => {
           customerName: '$customer.name',
           email: '$customer.email',
           services: '$serviceNames',
+          bookedPrice: '$bookedPrice',
           location: '$centerName',
           utmSource: '$visit.utmSource',
           utmCampaign: '$visit.utmCampaign',
@@ -1115,7 +1116,11 @@ router.get('/upcoming', async (req, res) => {
         }
       }
       row.platform = row.utmSource || 'direct';
-      row.estimatedValue = (row.services || []).reduce((sum, name) => sum + (avgPriceByService[name] || 0), 0);
+      // Real Zenoti booked price when the sync has it; historical average otherwise.
+      row.priceIsActual = row.bookedPrice != null;
+      row.estimatedValue = row.priceIsActual
+        ? row.bookedPrice
+        : (row.services || []).reduce((sum, name) => sum + (avgPriceByService[name] || 0), 0);
       delete row.customerId;
     }));
 

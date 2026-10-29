@@ -46,6 +46,11 @@ const appointmentSchema = new Schema({
   // looking the guest up again at close time - one Zenoti call per guest
   // per visit, not two.
   customerType: { type: String, enum: ['new', 'returning', null], default: null },
+  // Real booked price (incl. tax) from Zenoti's guest appointments API -
+  // the booking webhook carries no price. Set by
+  // syncUpcomingAppointmentsFromZenoti.js; null = not known yet, Upcoming
+  // falls back to the historical-average estimate.
+  bookedPrice: { type: Number, default: null },
 }, { timestamps: true });
 
 appointmentSchema.index({ brandId: 1, zenotiAppointmentGroupId: 1 });

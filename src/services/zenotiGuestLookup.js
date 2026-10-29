@@ -156,6 +156,29 @@ async function lookupGuestAppointmentsAllPages(guestId, { pageSize = 100, maxPag
   }
 }
 
+// Total booked price (incl. tax) of one live appointment group from
+// /v1/guests/{id}/appointments. Tolerant of where Zenoti puts it (per
+// service or on the group, as a {final|sales+tax} object or a number).
+// Returns null when no price is present - caller keeps its estimate.
+function priceValue(p) {
+  if (p == null) return null;
+  if (typeof p === 'number') return p;
+  if (typeof p === 'object') {
+    if (p.final != null) return Number(p.final);
+    if (p.sales != null) return Number(p.sales) + Number(p.tax || 0);
+  }
+  return null;
+}
+function bookedPriceFromLiveAppointment(live) {
+  const services = Array.isArray(live && live.appointment_services) ? live.appointment_services : [];
+  const perService = services.map((s) => priceValue(s.price) ?? priceValue(s.service && s.service.price));
+  if (perService.length && perService.every((v) => v != null && !Number.isNaN(v))) {
+    return Math.round(perService.reduce((a, b) => a + b, 0) * 100) / 100;
+  }
+  const group = priceValue(live && (live.price || live.total_price));
+  return group != null && !Number.isNaN(group) ? group : null;
+}
+
 function earliestServiceStart(appointment) {
   const services = Array.isArray(appointment.appointment_services) ? appointment.appointment_services : [];
   const times = services.map((s) => s.start_time).filter(Boolean).map((t) => new Date(t)).filter((d) => !Number.isNaN(d.getTime()));
@@ -248,6 +271,7 @@ function extractGuestPhone(guest) {
 }
 
 module.exports = {
+  bookedPriceFromLiveAppointment,
   lookupGuestByEmail,
   lookupGuestById,
   lookupGuestAppointments,
