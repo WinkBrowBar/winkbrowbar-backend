@@ -10,8 +10,7 @@
     "UES": "188b010f-a060-4ba9-a5c0-56ffb4339479"
   },
   "centralLocations": {
-    "CENTRAL_WINK": 62239572083,
-    "CENTRAL_EMBR": 89094324339
+    "CENTRAL_WINK": 62239572083
   },
   "negativeStock": "floor-at-zero",
   "skipBundles": true,
