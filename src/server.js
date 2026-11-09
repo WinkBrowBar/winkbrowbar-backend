@@ -13,6 +13,7 @@ const brandRoutes = require('./routes/brandRoutes');
 const conversionRoutes = require('./routes/conversionRoutes');
 const authRoutes = require('./routes/authRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
+const inventoryRoutes = require('./routes/inventoryRoutes');
 const { requireAuth } = require('./middleware/requireAuth');
 const shopifyOAuth = require('./routes/shopifyOAuth');
 const zenotiWebhook = require('./webhooks/zenotiWebhook');
@@ -68,6 +69,9 @@ app.use('/api/auth', authRoutes);
 // Dashboard: requires a real logged-in human (JWT from /api/auth/login),
 // not the internal API key.
 app.use('/api/dashboard', requireAuth, dashboardRoutes);
+
+// Wink retail inventory sync (Zenoti studios -> Shopify): admin-only, JWT like the dashboard.
+app.use('/api/inventory', requireAuth, inventoryRoutes);
 
 const PORT = process.env.PORT || 4000;
 

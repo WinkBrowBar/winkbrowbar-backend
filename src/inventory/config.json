@@ -1,0 +1,23 @@
+{
+  "locations": {
+    "CH": 89094455411,
+    "WV": 89094422643,
+    "UES": 89094488179
+  },
+  "centers": {
+    "CH": "23c89dee-8285-4c13-b081-12652173dc17",
+    "WV": "fe6b4dd3-1c8c-4f6e-84ac-42e6f81a001a",
+    "UES": "188b010f-a060-4ba9-a5c0-56ffb4339479"
+  },
+  "centralLocations": {
+    "CENTRAL_WINK": 62239572083,
+    "CENTRAL_EMBR": 89094324339
+  },
+  "negativeStock": "floor-at-zero",
+  "skipBundles": true,
+  "connectMissingLocations": true,
+  "excludeCodes": ["45", "69"],
+  "allowedShopifyStatuses": ["active", "unlisted"],
+  "maxWritesPerRun": 200,
+  "maxZeroedFractionWithoutForce": 0.25
+}

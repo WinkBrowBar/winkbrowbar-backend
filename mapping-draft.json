@@ -1,0 +1,522 @@
+[
+  {
+    "zenotiCode": "24",
+    "zenotiName": "Brow and Lash Nourishing Fortifier & Keratin",
+    "shopifyProduct": "Brow + Lash Nourishing Fortifier + Keratin",
+    "shopifyVariant": "Default Title",
+    "variant_id": 42889652568179,
+    "inventory_item_id": 44914961612915,
+    "sku": "24",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "41",
+    "zenotiName": "Brow Basics Bundle (LB)",
+    "shopifyProduct": "Brow Basics Bundle",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 44276481294451,
+    "inventory_item_id": 46306332672115,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "40",
+    "zenotiName": "Brow Basics Bundle (DB)",
+    "shopifyProduct": "Brow Basics Bundle",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 44276481327219,
+    "inventory_item_id": 46306332704883,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "44",
+    "zenotiName": "Brow Basics Bundle (DG)",
+    "shopifyProduct": "Brow Basics Bundle",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 44276481359987,
+    "inventory_item_id": 46306332737651,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "8",
+    "zenotiName": "Brow Perfecting Quad - Brunette",
+    "shopifyProduct": "Brow Perfecting Quad",
+    "shopifyVariant": "Brunette",
+    "variant_id": 42890094182515,
+    "inventory_item_id": 44915403194483,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "9",
+    "zenotiName": "Brow Perfecting Quad - Light",
+    "shopifyProduct": "Brow Perfecting Quad",
+    "shopifyVariant": "Light",
+    "variant_id": 42886089605235,
+    "inventory_item_id": 44911397666931,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "7",
+    "zenotiName": "Brow Perfecting Quad - Dark",
+    "shopifyProduct": "Brow Perfecting Quad",
+    "shopifyVariant": "Dark",
+    "variant_id": 42890094149747,
+    "inventory_item_id": 44915403161715,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "54",
+    "zenotiName": "Brows but Precisely Better Bundle (LB)",
+    "shopifyProduct": "Brows But Precisely Better Bundle",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 44296654946419,
+    "inventory_item_id": 46326538076275,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "53",
+    "zenotiName": "Brows but Precisely Better Bundle (DB)",
+    "shopifyProduct": "Brows But Precisely Better Bundle",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 44296654979187,
+    "inventory_item_id": 46326538109043,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "55",
+    "zenotiName": "Brows but Precisely Better Bundle (DG)",
+    "shopifyProduct": "Brows But Precisely Better Bundle",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 44296655011955,
+    "inventory_item_id": 46326538141811,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "56",
+    "zenotiName": "Brows but Sculpted Better Bundle (LB)",
+    "shopifyProduct": "Brows but Sculpted Better Bundle",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 44276523139187,
+    "inventory_item_id": 46306374516851,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "52",
+    "zenotiName": "Brows but Sculpted Better Bundle (DB)",
+    "shopifyProduct": "Brows but Sculpted Better Bundle",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 44276523171955,
+    "inventory_item_id": 46306374549619,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "58",
+    "zenotiName": "Brows but Sculpted Better Bundle (DG)",
+    "shopifyProduct": "Brows but Sculpted Better Bundle",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 44276523204723,
+    "inventory_item_id": 46306374582387,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "61",
+    "zenotiName": "Brows with Benefits Bundle (Light)",
+    "shopifyProduct": "Brows with Benefits Bundle",
+    "shopifyVariant": "Light",
+    "variant_id": 44276522156147,
+    "inventory_item_id": 46306373533811,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "60",
+    "zenotiName": "Brows with Benefits Bundle (Dark)",
+    "shopifyProduct": "Brows with Benefits Bundle",
+    "shopifyVariant": "Dark",
+    "variant_id": 44276522188915,
+    "inventory_item_id": 46306373566579,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "50",
+    "zenotiName": "Brows with Benefits Bundle (Brunette)",
+    "shopifyProduct": "Brows with Benefits Bundle",
+    "shopifyVariant": "Brunette",
+    "variant_id": 44276522221683,
+    "inventory_item_id": 46306373599347,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "1",
+    "zenotiName": "Cleanse & Clarify Emulsion",
+    "shopifyProduct": "Cleanse + Clarify Emulsion",
+    "shopifyVariant": "Default Title",
+    "variant_id": 18206344314995,
+    "inventory_item_id": 18413644644467,
+    "sku": "1",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "29",
+    "zenotiName": "Embrowerment Precision Pencil - Light Brown",
+    "shopifyProduct": "Embrowerment® Precision Pencil",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 39864085086323,
+    "inventory_item_id": 41966895464563,
+    "sku": "29",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "28",
+    "zenotiName": "Embrowerment Precision Pencil - Dark Brown",
+    "shopifyProduct": "Embrowerment® Precision Pencil",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 39864085053555,
+    "inventory_item_id": 41966895431795,
+    "sku": "28",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "27",
+    "zenotiName": "Embrowerment Precision Pencil - Dark Gray",
+    "shopifyProduct": "Embrowerment® Precision Pencil",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 39864085119091,
+    "inventory_item_id": 41966895497331,
+    "sku": "27",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "11",
+    "zenotiName": "Embrowerment Sculpting Pencil - Dark Brown",
+    "shopifyProduct": "Embrowerment® Sculpting Pencil",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 29428623802483,
+    "inventory_item_id": 30544983457907,
+    "sku": "11",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "11",
+    "zenotiName": "Embrowerment Sculpting Pencil - Dark Brown",
+    "shopifyProduct": "Embrowerment® Sculpting Pencil",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 29428642775155,
+    "inventory_item_id": 30545002037363,
+    "sku": "12",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "13",
+    "zenotiName": "Embrowerment Sculpting Pencil - Dark Gray",
+    "shopifyProduct": "Embrowerment® Sculpting Pencil",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 31518786715763,
+    "inventory_item_id": 33070847164531,
+    "sku": "16",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "6",
+    "zenotiName": "Flash Eye Lift Serum",
+    "shopifyProduct": "Flash Eye Lift Serum",
+    "shopifyVariant": "Default Title",
+    "variant_id": 42886266191987,
+    "inventory_item_id": 44911574384755,
+    "sku": "6",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "21",
+    "zenotiName": "Fortify + Precision Bundle (LB)",
+    "shopifyProduct": "Fortify + Precision Bundle",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 44296693186675,
+    "inventory_item_id": 46326576316531,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "49",
+    "zenotiName": "Fortify + Precision Bundle (DB)",
+    "shopifyProduct": "Fortify + Precision Bundle",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 44296693219443,
+    "inventory_item_id": 46326576349299,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "32",
+    "zenotiName": "Fortify + Precision Bundle (DG)",
+    "shopifyProduct": "Fortify + Precision Bundle",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 44296693252211,
+    "inventory_item_id": 46326576382067,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "59",
+    "zenotiName": "Fortify + Sculpt Bundle (LB)",
+    "shopifyProduct": "Fortify + Sculpt Bundle",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 44296692465779,
+    "inventory_item_id": 46326575595635,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "48",
+    "zenotiName": "Fortify + Sculpt Bundle (DB)",
+    "shopifyProduct": "Fortify + Sculpt Bundle",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 44296692498547,
+    "inventory_item_id": 46326575628403,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "65",
+    "zenotiName": "Fortify + Sculpt Bundle (DG)",
+    "shopifyProduct": "Fortify + Sculpt Bundle",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 44296692531315,
+    "inventory_item_id": 46326575661171,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "51",
+    "zenotiName": "Hold Please Bundle",
+    "shopifyProduct": "Hold Please! Bundle",
+    "shopifyVariant": "Default Title",
+    "variant_id": 44296688238707,
+    "inventory_item_id": 46326571368563,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "4",
+    "zenotiName": "Hydradepth Renewal Cream",
+    "shopifyProduct": "HydraDepth Renewal Cream",
+    "shopifyVariant": "Default Title",
+    "variant_id": 18206664884339,
+    "inventory_item_id": 18413972947059,
+    "sku": "4",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "34",
+    "zenotiName": "Lash + Lamination Aftercare Bundle",
+    "shopifyProduct": "Lash + Lamination Aftercare Bundle",
+    "shopifyVariant": "Default Title",
+    "variant_id": 44276439777395,
+    "inventory_item_id": 46306291155059,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "26",
+    "zenotiName": "Power Brow Enhancing Serum",
+    "shopifyProduct": "Power Brow Enhancing Serum",
+    "shopifyVariant": "Default Title",
+    "variant_id": 42874937081971,
+    "inventory_item_id": 44900243308659,
+    "sku": "26",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "31",
+    "zenotiName": "Power Brow Separator",
+    "shopifyProduct": "Power Brow Separator",
+    "shopifyVariant": "Default Title",
+    "variant_id": 39863705239667,
+    "inventory_item_id": 41966515617907,
+    "sku": "31",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "25",
+    "zenotiName": "Power Hold Brow Styling Wax",
+    "shopifyProduct": "Power Hold Brow Styling Wax",
+    "shopifyVariant": "Default Title",
+    "variant_id": 39414047637619,
+    "inventory_item_id": 41512686190707,
+    "sku": "25",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "30",
+    "zenotiName": "Power Makeup Eraser",
+    "shopifyProduct": "Power Makeup Eraser",
+    "shopifyVariant": "Default Title",
+    "variant_id": 39739081392243,
+    "inventory_item_id": 41841281400947,
+    "sku": "30",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "66",
+    "zenotiName": "Precision Power Bundle (LB)",
+    "shopifyProduct": "Precision Power Bundle",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 44296692203635,
+    "inventory_item_id": 46326575333491,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "57",
+    "zenotiName": "Precision Power Bundle (DB)",
+    "shopifyProduct": "Precision Power Bundle",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 44296692236403,
+    "inventory_item_id": 46326575366259,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "67",
+    "zenotiName": "Precision Power Bundle (DG)",
+    "shopifyProduct": "Precision Power Bundle",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 44296692269171,
+    "inventory_item_id": 46326575399027,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "22",
+    "zenotiName": "Pure Hyaluronic Serum",
+    "shopifyProduct": "Pure Hyaluronic Serum",
+    "shopifyVariant": "Default Title",
+    "variant_id": 32092920938611,
+    "inventory_item_id": 33662928912499,
+    "sku": "22",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "62",
+    "zenotiName": "Serum + Sculpt Bundle (LB)",
+    "shopifyProduct": "Serum + Sculpt Bundle",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 44296691482739,
+    "inventory_item_id": 46326574612595,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "46",
+    "zenotiName": "Serum + Sculpt Bundle (DB)",
+    "shopifyProduct": "Serum + Sculpt Bundle",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 44296691515507,
+    "inventory_item_id": 46326574645363,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "63",
+    "zenotiName": "Serum + Sculpt Bundle (DG)",
+    "shopifyProduct": "Serum + Sculpt Bundle",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 44296691548275,
+    "inventory_item_id": 46326574678131,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "2",
+    "zenotiName": "Soothing Sensations Toner",
+    "shopifyProduct": "Soothing Sensations Toner",
+    "shopifyVariant": "Default Title",
+    "variant_id": 18206438490227,
+    "inventory_item_id": 18413738721395,
+    "sku": "2",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "36",
+    "zenotiName": "Tint + Shape Aftercare Bundle (LB)",
+    "shopifyProduct": "Tint + Shape Aftercare Bundle",
+    "shopifyVariant": "Light Brown",
+    "variant_id": 44276462813299,
+    "inventory_item_id": 46306314190963,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "35",
+    "zenotiName": "Tint + Shape Aftercare Bundle (DB)",
+    "shopifyProduct": "Tint + Shape Aftercare Bundle",
+    "shopifyVariant": "Dark Brown",
+    "variant_id": 44276462846067,
+    "inventory_item_id": 46306314223731,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "37",
+    "zenotiName": "Tint + Shape Aftercare Bundle (DG)",
+    "shopifyProduct": "Tint + Shape Aftercare Bundle",
+    "shopifyVariant": "Dark Gray",
+    "variant_id": 44276462878835,
+    "inventory_item_id": 46306314256499,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "42",
+    "zenotiName": "Wink Applicator Brush",
+    "shopifyProduct": "Wink Applicator Brush",
+    "shopifyVariant": "Default Title",
+    "variant_id": 42887471497331,
+    "inventory_item_id": 44912779624563,
+    "sku": "",
+    "matchedBy": "name"
+  },
+  {
+    "zenotiCode": "23",
+    "zenotiName": "Wink Holographic Bag",
+    "shopifyProduct": "Wink Holographic Makeup Bag",
+    "shopifyVariant": "Default Title",
+    "variant_id": 32092922544243,
+    "inventory_item_id": 33662930518131,
+    "sku": "23",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "5",
+    "zenotiName": "WinkBoost Vitamin Charge Cream",
+    "shopifyProduct": "Winkboost Vitamin Charge Cream",
+    "shopifyVariant": "Default Title",
+    "variant_id": 18206732910707,
+    "inventory_item_id": 18414042546291,
+    "sku": "5",
+    "matchedBy": "sku"
+  },
+  {
+    "zenotiCode": "3",
+    "zenotiName": "Zen Cream",
+    "shopifyProduct": "Zen Cream",
+    "shopifyVariant": "Default Title",
+    "variant_id": 18206539808883,
+    "inventory_item_id": 18413847904371,
+    "sku": "3",
+    "matchedBy": "sku"
+  }
+]
