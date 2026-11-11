@@ -131,6 +131,7 @@ async function applyPlan({ force = false, who = 'dashboard' } = {}) {
   applying = true;
   try {
     const { summary: s } = await makePlan();
+    if (!s.changes.length) return { written: 0, failed: 0, results: [] }; // already in sync - nothing to write or log
     const block = async (msg) => { await logActivity({ type: 'apply_blocked', who, summary: msg }); return Object.assign(new Error(msg), { status: 400 }); };
     if (s.changes.length > config.maxWritesPerRun && !force) throw await block(`Refusing: ${s.changes.length} writes exceeds maxWritesPerRun (${config.maxWritesPerRun}). Tick "Override safety limits" if intended.`);
     if (s.considered && s.toZero / s.considered > config.maxZeroedFractionWithoutForce && !force) throw await block(`Refusing: ${s.toZero} of ${s.considered} would drop to 0 (more than ${config.maxZeroedFractionWithoutForce * 100}%). Check Zenoti stock accuracy, or tick "Override safety limits".`);

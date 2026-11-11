@@ -8,6 +8,7 @@ const Brand = require('../db/models/Brand');
 const { centerName } = require('../utils/centerNames');
 const { resolveIdentity } = require('../services/identityResolution');
 const { processInvoiceConversion } = require('../services/conversionService');
+const inventoryAuto = require('../inventory/auto');
 const { centerLocalTimeToUtc } = require('../utils/centerTimezone');
 const { determineCustomerType, lookupGuestAppointmentsAllPages, bookedPriceFromLiveAppointment } = require('../services/zenotiGuestLookup');
 const router = express.Router();
@@ -480,6 +481,9 @@ if (data.initial_appointment_start_time) update.originalAppointmentDate = center
       },
       { upsert: true, new: true }
     );
+
+    // A closed studio sale/return may have changed retail stock - queue an automatic Shopify stock sync.
+    if (isEffectivelyClosed) inventoryAuto.onInvoiceClosed(center.id || inv.center_id);
 
     // Only run conversion processing when the invoice is actually (or
     // effectively) closed - guards against double-counting revenue on

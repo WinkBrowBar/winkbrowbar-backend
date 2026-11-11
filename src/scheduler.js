@@ -21,6 +21,7 @@ const cron = require('node-cron');
 const { syncAllBrands } = require('../syncUpcomingAppointmentsFromZenoti');
 const Brand = require('./db/models/Brand');
 const { syncCallLeadsFromSheet } = require('./services/syncCallLeadsFromSheet');
+const inventoryAuto = require('./inventory/auto');
 
 // Pulls every brand's Google Ads call-log sheet (whichever ones actually
 // have one saved - see dashboardRoutes.js's call-lead-sheet panel) so new
@@ -64,6 +65,10 @@ function startScheduler() {
     await syncCallLeadSheets();
   });
   console.log('[scheduler] Call-lead sheet sync scheduled every hour.');
+
+  // Zenoti -> Shopify studio stock, catch-all for transfers/receiving/adjustments (sales also trigger it - see inventory/auto.js).
+  cron.schedule('*/30 * * * *', () => inventoryAuto.run('scheduled'));
+  console.log('[scheduler] Inventory auto-sync scheduled every 30 minutes.');
 }
 
 module.exports = { startScheduler };
