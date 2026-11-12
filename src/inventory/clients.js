@@ -35,9 +35,11 @@ async function zenotiGet(path, params, retries = 3) {
 
 // Retail stock for one center: [{ code, name, quantity }]. product_type=1 is Retail; category is
 // checked again because Zenoti also returns fee/migration placeholder rows.
+// inventory_date returns stock as of the START of that day (today's sales/transfers excluded), so ask
+// for tomorrow (New York) to get current stock - verified: UES code 42 today=-7, tomorrow=78 = Zenoti report.
 async function zenotiRetailStock(centerId) {
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-  const data = await zenotiGet('/v1/inventory/stock', { center_id: centerId, inventory_date: today, product_type: 1 });
+  const tomorrow = new Date(Date.now() + 864e5).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const data = await zenotiGet('/v1/inventory/stock', { center_id: centerId, inventory_date: tomorrow, product_type: 1 });
   return (data.list || [])
     .filter((p) => String(p.category || '').trim().toLowerCase() === 'retail')
     .map((p) => ({ code: String(p.product_code), name: p.product_name, quantity: Number(p.total_quantity) }));
